@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Messages — Fais Ton Show</title>
+<link rel="manifest" href="./manifest.json">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/fts-chat.css">
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<script>
+function setH(){ document.documentElement.style.setProperty("--vh", window.innerHeight + "px"); }
+setH(); window.addEventListener("resize", setH);
+window.addEventListener("orientationchange", () => setTimeout(setH, 200));
+</script>
+</head>
+</head>
+<body>
+
+<!-- ═══ AUTH LOADING ════════════════════════════════════════════ -->
+<div class="auth-loading" id="auth-loading">
+  <div class="auth-logo">FAIS TON <span>SHOW</span></div>
+  <div class="spinner"></div>
+</div>
+
+<!-- ═══ APP ══════════════════════════════════════════════════════ -->
+<div class="app" id="app" style="display:none">
+
+  <!-- ══ SIDEBAR ══ -->
+  <div class="sidebar">
+
+    <div class="sb-hdr">
+      <div class="sb-avatar" id="my-avatar">?</div>
+      <div class="sb-title">MESSAGES</div>
+      <button class="btn-compose" onclick="openModal()" title="Nouveau message">✏️</button>
+    </div>
+
+    <div class="sb-search">
+      <input class="search-inp" type="text" placeholder="Rechercher une conversation…"
+        oninput="searchConvs(this.value)">
+    </div>
+
+    <div class="conv-list" id="conv-list">
+      <div class="conv-empty">
+        <span class="conv-empty-icon">✉️</span>
+        <p>Aucune conversation.<br>Commence un message !</p>
+      </div>
+    </div>
+
+    <nav class="sb-nav">
+      <a href="membres.html" class="snav"><span class="ico">👤</span><span>Membres</span></a>
+      <a href="forum.html"   class="snav"><span class="ico">💬</span><span>Forum</span></a>
+      <button class="snav logout" onclick="doSignOut()"><span class="ico">🚪</span><span>Quitter</span></button>
+    </nav>
+
+  </div><!-- /sidebar -->
+
+  <!-- ══ MAIN ══ -->
+  <div class="main" id="main">
+
+    <!-- Vide (desktop uniquement) -->
+    <div class="chat-empty" id="chat-empty">
+      <div class="chat-empty-ring">✉️</div>
+      <div class="chat-empty-title">FAIS TON <span>SHOW</span></div>
+      <div class="chat-empty-sub">Sélectionne une conversation ou envoie un nouveau message privé.</div>
+      <button class="btn-start" onclick="openModal()">✏️ Nouveau message</button>
+    </div>
+
+    <!-- Zone chat -->
+    <div class="chat-zone" id="chat-zone">
+      <div class="chat-hdr">
+        <button class="btn-back" onclick="closeChat()">←</button>
+        <div class="chat-hdr-av" id="chat-av"></div>
+        <div class="chat-hdr-info">
+          <div class="chat-hdr-name" id="chat-name">…</div>
+          <div class="chat-hdr-sub"  id="chat-sub"></div>
+        </div>
+      </div>
+      <div class="messages" id="messages"></div>
+      <div class="input-area">
+        <div class="input-pill">
+          <textarea class="msg-input" id="msg-input" placeholder="Message…" rows="1"
+            onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+        </div>
+        <button class="btn-send" onclick="sendMessage()">➤</button>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+
+</div><!-- /app -->
+
+<!-- ═══ MODAL NOUVEAU MESSAGE ════════════════════════════════════ -->
+<div class="modal-overlay hidden" id="modal">
+  <div class="modal">
+    <div class="modal-grip"></div>
+    <div class="modal-hdr">
+      <div class="modal-title">Nouveau message</div>
+      <button class="btn-modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <div class="type-tabs">
+      <div class="type-tab on" id="tab-d" onclick="setType('direct')">👤 Message privé</div>
+      <div class="type-tab"    id="tab-g" onclick="setType('group')">👥 Groupe privé</div>
+    </div>
+
+    <div id="gname-wrap" style="display:none">
+      <label class="modal-lbl">Nom du groupe</label>
+      <input class="modal-field" id="gname" type="text" placeholder="Ex : Équipe Théâtre…">
+    </div>
+
+    <label class="modal-lbl" id="pick-lbl">Destinataire</label>
+    <input class="picker-search" id="picker-q" type="text" placeholder="Rechercher…" oninput="filterUsers()">
+    <div class="user-list" id="user-list"></div>
+    <div class="sel-info" id="sel-info"></div>
+    <div class="modal-err" id="modal-err"></div>
+
+    <div class="modal-btns">
+      <button class="btn-mcancel" onclick="closeModal()">Annuler</button>
+      <button class="btn-mstart"  onclick="startConv()">Démarrer →</button>
+    </div>
+  </div>
+</div>
+
+<script src="assets/js/fts-utils.js"></script>
+<script src="assets/js/fts-firebase.js"></script>
+<script src="assets/js/fts-utils.js"></script>
+<script src="assets/js/fts-firebase.js"></script>
+<script src="assets/js/fts-chat.js"></script>
+<script>
+/* ================================================================
+   MESSAGES.JS — Messagerie privée FTS
+   ✅ Layout mobile-first (slide panel)
+   ✅ Couleurs site FTS
+   ✅ iOS zoom fix (font-size 16px)
+   ================================================================ */
+
+let db, auth, me, myUid;
+let allUsers = {}, allConvs = [];
+let currentConvId = null, currentListener = null;
+let convType = "direct", selectedUids = new Set(), lastMsgDate = null;
+
+/* Couleurs avatars déterministes */
+function avColor(s){ return FTSChat.avColor(s); }
+function setAv(el, name, isGroup){ FTSChat.setAvatar(el, name, { type: isGroup ? "group" : "person", icon: "👥" }); }
+
+/* ── INIT ────────────────────────────────────────────────────── */
+window.addEventListener("DOMContentLoaded", () => {
+  db   = FTS.initFirebase();
+  auth = firebase.auth();
+
+  auth.onAuthStateChanged(async user => {
+    if(!user){ location.href="auth.html"; return; }
+    myUid = user.uid;
+    try{
+      const s = await db.ref("fts_users/"+myUid).once("value");
+      me = s.val();
+      if(!me || me.status !== "active"){ await auth.signOut(); location.href="auth.html"; return; }
+
+      document.getElementById("auth-loading").style.display = "none";
+      document.getElementById("app").style.display = "flex";
+
+      const av = document.getElementById("my-avatar");
+      av.textContent = (me.name||"?").charAt(0).toUpperCase();
+      av.style.background = avColor(me.name||myUid);
+
+      await loadUsers();
+      listenConvs();
+    }catch(e){ console.warn("[FTS Msg]", e); location.href="auth.html"; }
+  });
+});
+
+/* ── MEMBRES ─────────────────────────────────────────────────── */
+async function loadUsers(){
+  const s = await db.ref("fts_users").orderByChild("status").equalTo("active").once("value");
+  allUsers = {};
+  if(s.exists()) s.forEach(c => { if(c.key !== myUid) allUsers[c.key] = c.val(); });
+}
+
+/* ── CONVERSATIONS ───────────────────────────────────────────── */
+function listenConvs(){
+  db.ref("fts_dm/userConvs/"+myUid).on("value", async snap => {
+    const ids = snap.val() ? Object.keys(snap.val()) : [];
+    if(!ids.length){ renderConvs([]); return; }
+    const loaded = await Promise.all(
+      ids.map(id => db.ref("fts_dm/conversations/"+id).once("value").then(s => ({id, data:s.val()})))
+    );
+    allConvs = loaded.filter(c => c.data).sort((a,b) => (b.data.lastTs||0)-(a.data.lastTs||0));
+    renderConvs(allConvs);
+  });
+}
+
+function renderConvs(convs){
+  const el = document.getElementById("conv-list");
+  if(!convs.length){
+    el.innerHTML = `<div class="conv-empty"><span class="conv-empty-icon">✉️</span><p>Aucune conversation.<br>Commence un message !</p></div>`;
+    return;
+  }
+  el.innerHTML = convs.map(({id, data}) => {
+    const isG  = data.type === "group";
+    const unrd = (data.unread && data.unread[myUid]) || 0;
+    const name = isG ? (data.name||"Groupe") : otherName(data.participants);
+    const col  = isG ? "rgba(201,168,76,.2)" : avColor(name);
+    const lett = isG ? "👥" : name.charAt(0).toUpperCase();
+    const prev = data.lastMessage ? FTS.esc(data.lastMessage.substring(0,55)) : "Nouvelle conversation";
+    const ts   = data.lastTs ? fmtTs(data.lastTs) : "";
+    return `<div class="conv-item${id===currentConvId?" active":""}" onclick="selectConv('${id}')">
+      <div class="conv-av" style="background:${col}">${lett}</div>
+      <div class="conv-body">
+        <div class="conv-row1">
+          <div class="conv-name">${FTS.esc(name)}</div>
+          <div class="conv-ts${unrd?" unread":""}">${ts}</div>
+        </div>
+        <div class="conv-row2">
+          <div class="conv-preview">${prev}</div>
+          ${unrd ? `<div class="conv-badge">${unrd>99?"99+":unrd}</div>` : ""}
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function otherName(parts){
+  if(!parts) return "Inconnu";
+  const uid = Object.keys(parts).find(u => u !== myUid);
+  if(!uid) return "Moi";
+  const u = allUsers[uid];
+  return u ? u.name||u.email : "Membre";
+}
+
+function searchConvs(q){
+  if(!q.trim()){ renderConvs(allConvs); return; }
+  const t = q.toLowerCase();
+  renderConvs(allConvs.filter(({data}) => {
+    const n = data.type==="group" ? (data.name||"") : otherName(data.participants);
+    return n.toLowerCase().includes(t);
+  }));
+}
+
+/* ── SÉLECTION ───────────────────────────────────────────────── */
+async function selectConv(id){
+  currentConvId = id; lastMsgDate = null;
+  document.querySelectorAll(".conv-item").forEach(el =>
+    el.classList.toggle("active", el.onclick.toString().includes(`'${id}'`))
+  );
+  const s    = await db.ref("fts_dm/conversations/"+id).once("value");
+  const data = s.val(); if(!data) return;
+  const isG  = data.type === "group";
+  const name = isG ? (data.name||"Groupe") : otherName(data.participants);
+  const pc   = Object.keys(data.participants||{}).length;
+
+  setAv(document.getElementById("chat-av"), name, isG);
+  document.getElementById("chat-name").textContent = name;
+  document.getElementById("chat-sub").textContent  = isG ? `${pc} participant${pc>1?"s":""}` : "Message privé";
+
+  /* Afficher chat */
+  document.getElementById("chat-empty").style.display = "none";
+  document.getElementById("chat-zone").classList.add("on");
+  document.getElementById("app").classList.add("chat-open");
+
+  /* Messages */
+  document.getElementById("messages").innerHTML = "";
+  if(currentListener) currentListener();
+  const ref = db.ref("fts_dm/messages/"+id).limitToLast(80);
+  ref.on("child_added", snap => addMsg(snap.val(), snap.val().senderId === myUid));
+  currentListener = () => ref.off();
+
+  /* Marquer lu */
+  db.ref("fts_dm/conversations/"+id+"/unread/"+myUid).set(0);
+  setTimeout(() => document.getElementById("msg-input").focus(), 200);
+}
+
+/* ── FERMER CHAT (mobile) ────────────────────────────────────── */
+function closeChat(){
+  document.getElementById("app").classList.remove("chat-open");
+  document.getElementById("chat-zone").classList.remove("on");
+  document.getElementById("chat-empty").style.display = "flex";
+  currentConvId = null;
+  if(currentListener){ currentListener(); currentListener = null; }
+  document.querySelectorAll(".conv-item").forEach(el => el.classList.remove("active"));
+}
+
+/* ── ENVOI ───────────────────────────────────────────────────── */
+async function sendMessage(){
+  if(!currentConvId) return;
+  const input = document.getElementById("msg-input");
+  const text  = input.value.trim(); if(!text) return;
+  input.value = ""; input.style.height = "";
+  const msg = { senderId:myUid, senderName:me.name||me.email, text, ts:Date.now() };
+  await db.ref("fts_dm/messages/"+currentConvId).push(msg);
+  const ps = (await db.ref("fts_dm/conversations/"+currentConvId+"/participants").once("value")).val()||{};
+  const upd = {
+    ["fts_dm/conversations/"+currentConvId+"/lastMessage"]:    text.substring(0,80),
+    ["fts_dm/conversations/"+currentConvId+"/lastSenderName"]: me.name,
+    ["fts_dm/conversations/"+currentConvId+"/lastTs"]:         msg.ts,
+  };
+  for(const uid of Object.keys(ps)){
+    if(uid !== myUid){
+      const c = (await db.ref("fts_dm/conversations/"+currentConvId+"/unread/"+uid).once("value")).val()||0;
+      upd["fts_dm/conversations/"+currentConvId+"/unread/"+uid] = c+1;
+    }
+  }
+  await db.ref().update(upd);
+}
+
+/* ── BULLE ───────────────────────────────────────────────────── */
+function isGroupConv(){ const c=allConvs.find(x=>x.id===currentConvId); return c&&c.data&&c.data.type==="group"; }
+
+function addMsg(m, own){
+  const wrap = document.getElementById("messages");
+  const dStr = new Date(m.ts).toDateString();
+  if(dStr !== lastMsgDate){
+    lastMsgDate = dStr;
+    const sep = document.createElement("div");
+    sep.className = "day-sep";
+    sep.innerHTML = `<span>${fmtDay(m.ts)}</span>`;
+    wrap.appendChild(sep);
+  }
+  const div = document.createElement("div");
+  div.className = "msg-wrap " + (own ? "own" : "other");
+  const showSender = !own && isGroupConv();
+  div.innerHTML = `
+    ${showSender ? `<div class="msg-sender">${FTS.esc(m.senderName)}</div>` : ""}
+    <div class="msg-bubble">
+      ${FTS.esc(m.text).replace(/\n/g,"<br>")}
+      <div class="msg-foot">
+        <span class="msg-time">${fmtFull(m.ts)}</span>
+        ${own ? '<span class="msg-check">✓✓</span>' : ""}
+      </div>
+    </div>`;
+  wrap.appendChild(div);
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+/* ── MODAL ───────────────────────────────────────────────────── */
+function openModal(){
+  selectedUids.clear(); convType = "direct";
+  document.getElementById("tab-d").classList.add("on");
+  document.getElementById("tab-g").classList.remove("on");
+  document.getElementById("gname-wrap").style.display = "none";
+  document.getElementById("pick-lbl").textContent = "Destinataire";
+  document.getElementById("picker-q").value = "";
+  document.getElementById("modal-err").textContent = "";
+  document.getElementById("sel-info").textContent = "";
+  renderUsers(Object.entries(allUsers));
+  document.getElementById("modal").classList.remove("hidden");
+}
+function closeModal(){ document.getElementById("modal").classList.add("hidden"); }
+
+function setType(t){
+  convType = t;
+  document.getElementById("tab-d").classList.toggle("on", t==="direct");
+  document.getElementById("tab-g").classList.toggle("on", t==="group");
+  document.getElementById("gname-wrap").style.display = t==="group" ? "block" : "none";
+  document.getElementById("pick-lbl").textContent = t==="group" ? "Membres du groupe" : "Destinataire";
+  selectedUids.clear();
+  document.getElementById("sel-info").textContent = "";
+  renderUsers(Object.entries(allUsers));
+}
+
+function filterUsers(){
+  const q = document.getElementById("picker-q").value.toLowerCase();
+  renderUsers(Object.entries(allUsers).filter(([,u]) => (u.name||u.email||"").toLowerCase().includes(q)));
+}
+
+function renderUsers(users){
+  const el = document.getElementById("user-list");
+  if(!users.length){ el.innerHTML='<div style="padding:.8rem 1rem;font-size:.82rem;color:#555">Aucun membre trouvé</div>'; return; }
+  el.innerHTML = users.map(([uid, u]) => {
+    const sel  = selectedUids.has(uid);
+    const role = u.role==="admin" ? "🛡 Admin" : u.role==="prof" ? "🎓 Prof" : "";
+    return `<div class="user-row${sel?" sel":""}" onclick="toggleUser('${uid}')">
+      <div class="user-av" style="background:${avColor(u.name||uid)}">${(u.name||u.email||"?").charAt(0).toUpperCase()}</div>
+      <div style="flex:1;min-width:0">
+        <div class="user-name">${FTS.esc(u.name||u.email)}</div>
+        ${role ? `<div class="user-role">${role}</div>` : ""}
+      </div>
+      <div class="user-check">${sel?"✓":""}</div>
+    </div>`;
+  }).join("");
+}
+
+function toggleUser(uid){
+  if(convType==="direct"){ selectedUids.clear(); selectedUids.add(uid); }
+  else{ selectedUids.has(uid) ? selectedUids.delete(uid) : selectedUids.add(uid); }
+  const n = selectedUids.size;
+  document.getElementById("sel-info").textContent = n ? `${n} membre${n>1?"s":""} sélectionné${n>1?"s":""}` : "";
+  filterUsers();
+}
+
+async function startConv(){
+  const err = document.getElementById("modal-err");
+  if(!selectedUids.size){ err.textContent="Sélectionne au moins un membre."; return; }
+  if(convType==="group" && !document.getElementById("gname").value.trim()){ err.textContent="Entre un nom pour le groupe."; return; }
+  const parts = {[myUid]:true}; selectedUids.forEach(u => { parts[u]=true; });
+  let convId;
+  if(convType==="direct"){
+    const other = [...selectedUids][0];
+    convId = [myUid, other].sort().join("_");
+    const ex = await db.ref("fts_dm/conversations/"+convId).once("value");
+    if(!ex.exists()){
+      await db.ref("fts_dm/conversations/"+convId).set({type:"direct",participants:parts,lastMessage:"",lastTs:Date.now(),createdAt:Date.now()});
+      await db.ref("fts_dm/userConvs/"+myUid+"/"+convId).set(true);
+      await db.ref("fts_dm/userConvs/"+other+"/"+convId).set(true);
+    }
+  }else{
+    const ref = db.ref("fts_dm/conversations").push(); convId = ref.key;
+    await ref.set({type:"group",name:document.getElementById("gname").value.trim(),participants:parts,lastMessage:"",lastTs:Date.now(),createdAt:Date.now(),createdBy:myUid});
+    const idx = {}; Object.keys(parts).forEach(u => { idx["fts_dm/userConvs/"+u+"/"+convId]=true; });
+    await db.ref().update(idx);
+  }
+  closeModal();
+  await selectConv(convId);
+}
+
+/* ── DATES / HEURES ──────────────────────────────────────────── */
+function fmtTs(ts){ return FTSChat.fmtTs(ts); }
+function fmtFull(ts){ return FTSChat.fmtFull(ts); }
+function fmtDay(ts){ return FTSChat.fmtDay(ts); }
+function handleKey(e){ FTSChat.handleEnter(e, sendMessage); }
+function autoResize(el){ FTSChat.autoResize(el); }
+function doSignOut(){ auth.signOut().then(()=>location.href="auth.html"); }
+</script>
+<script src="assets/js/fts-pwa.js"></script>
+</body>
+</html>

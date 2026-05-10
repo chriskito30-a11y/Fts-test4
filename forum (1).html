@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Forum — Fais Ton Show</title>
+<link rel="manifest" href="./manifest.json">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/fts-chat.css">
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<script>
+function setH(){ document.documentElement.style.setProperty("--vh", window.innerHeight + "px"); }
+setH(); window.addEventListener("resize", setH);
+window.addEventListener("orientationchange", () => setTimeout(setH, 200));
+</script>
+</head>
+<body>
+<div class="auth-loading" id="auth-loading">
+  <div class="auth-logo">FAIS TON <span>SHOW</span></div>
+  <div class="spinner"></div>
+  <div style="font-size:.65rem;color:var(--muted);letter-spacing:.12em;text-transform:uppercase">Chargement du forum…</div>
+</div>
+
+<div class="app" id="app" style="display:none">
+  <div class="sidebar">
+    <div class="sb-hdr">
+      <div class="sb-avatar" id="my-avatar">?</div>
+      <div class="sb-title">FORUM</div>
+      <button class="btn-compose" id="btn-admin-gear" onclick="toggleAdminMode()" title="Mode admin" style="display:none">⚙️</button>
+    </div>
+
+    <div class="sb-search">
+      <input class="search-inp" id="forum-search" type="text" placeholder="Rechercher un canal…" oninput="renderForumList(this.value)">
+    </div>
+
+    <div class="conv-list" id="forum-list">
+      <div class="conv-empty"><span class="conv-empty-icon">💬</span><p>Chargement des catégories…</p></div>
+    </div>
+
+    <div class="notif-mini">
+      <button class="btn-notif" id="btn-notif" onclick="toggleNotifications()">🔕 Activer les notifs</button>
+    </div>
+
+    <nav class="sb-nav">
+      <a href="membres.html" class="snav"><span class="ico">👤</span><span>Membres</span></a>
+      <a href="messages.html" class="snav"><span class="ico">✉️</span><span>Messages</span><span class="conv-badge" id="msg-badge" style="display:none"></span></a>
+      <button class="snav logout" onclick="doSignOut()"><span class="ico">🚪</span><span>Quitter</span></button>
+    </nav>
+  </div>
+
+  <div class="main" id="main">
+    <div class="chat-empty" id="chat-empty">
+      <div class="chat-empty-ring">💬</div>
+      <div class="chat-empty-title">FORUM <span>FTS</span></div>
+      <div class="chat-empty-sub">Choisis une bulle de catégorie, puis ouvre le canal qui te concerne.</div>
+    </div>
+
+    <div class="chat-zone" id="chat-zone">
+      <div class="pending-bar" id="pending-bar">⏳ Ton accès au forum est en attente de validation</div>
+      <div class="admin-bar" id="admin-bar">⚠️ Mode administration actif <button class="btn-admin-small" onclick="exitAdmin()">Quitter</button></div>
+
+      <div class="chat-hdr">
+        <button class="btn-back" onclick="closeChat()">←</button>
+        <div class="chat-hdr-av" id="chat-av">💬</div>
+        <div class="chat-hdr-info">
+          <div class="chat-hdr-name" id="chat-name">…</div>
+          <div class="chat-hdr-sub" id="chat-sub"></div>
+        </div>
+      </div>
+
+      <div class="messages" id="messages"></div>
+
+      <div class="upload-bar" id="upload-bar">
+        <span id="upload-txt">Upload…</span>
+        <div class="upload-track"><div class="upload-fill" id="upload-fill"></div></div>
+      </div>
+
+      <div class="input-area">
+        <input type="file" id="file-input" accept="image/*,video/*,.pdf,.mp3" style="display:none" onchange="uploadMedia(this.files[0])">
+        <button class="btn-attach" onclick="document.getElementById('file-input').click()" title="Joindre un fichier">📎</button>
+        <div class="input-pill">
+          <textarea class="msg-input" id="msg-input" placeholder="Message…" rows="1" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+        </div>
+        <button class="btn-send" onclick="sendMessage()">➤</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="assets/js/fts-utils.js"></script>
+<script src="assets/js/fts-firebase.js"></script>
+<script src="assets/js/fts-chat.js"></script>
+<script>
+/* ================================================================
+   FORUM.JS — version factorisée visuellement avec Messages
+   - mêmes classes de shell que messages.html
+   - liste gauche = bulles de catégories
+   - chaque bulle ouvre les canaux accessibles
+   ================================================================ */
+
+let db, auth, uid, userProfile, userData;
+let csvStructure = [], csvLoaded = false;
+let forumItems = [];
+let openCats = {};
+let currentChannel = null, currentListener = null, lastMsgDate = null;
+let adminMode = false;
+
+function norm(s){ return FTS.norm(s); }
+function esc(s){ return FTS.esc(s); }
+function storageGet(k){ return localStorage.getItem(k); }
+function storageSet(k,v){ localStorage.setItem(k,v); }
+function catIcon(s){ return FTS.catIcon(s); }
+
+function parseCSVLine(line){
+  const result=[]; let current='', inQuotes=false;
+  for(let i=0;i<line.length;i++){
+    const c=line[i];
+    if(c==='"'){ inQuotes=!inQuotes; continue; }
+    if(c===',' && !inQuotes){ result.push(current.trim()); current=''; continue; }
+    current+=c;
+  }
+  result.push(current.trim()); return result;
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+  if('serviceWorker' in navigator){ navigator.serviceWorker.register('./sw.js', {scope:'./'}).catch(()=>{}); }
+  db = FTS.initFirebase(); auth = firebase.auth();
+  loadCSV();
+  auth.onAuthStateChanged(async user => {
+    if(!user){ location.href='auth.html'; return; }
+    uid = user.uid;
+    try{
+      const snap = await db.ref('fts_users/'+uid).once('value');
+      userProfile = snap.val();
+      if(!userProfile || userProfile.status === 'pending'){
+        await auth.signOut(); location.href='auth.html'; return;
+      }
+      if(userProfile.role === 'admin'){
+        adminMode = true;
+        document.getElementById('btn-admin-gear').style.display = 'flex';
+        document.getElementById('admin-bar').classList.add('show');
+      }
+      await loadUserData();
+      document.getElementById('auth-loading').style.display = 'none';
+      document.getElementById('app').style.display = 'flex';
+      const label = userProfile.firstName || userProfile.name || userProfile.email || '?';
+      FTSChat.setAvatar(document.getElementById('my-avatar'), label);
+      listenUnreadBadge(uid);
+      checkNotifStatus();
+      buildForumItems(); renderForumList();
+    }catch(e){ console.warn('[FTS Forum]', e); location.href='auth.html'; }
+  });
+});
+
+async function loadUserData(){
+  const snap = await db.ref('fts_forum/users/'+uid).once('value');
+  if(snap.exists()) userData = snap.val();
+  else{
+    userData = {
+      name: userProfile.name || [userProfile.firstName,userProfile.lastName].filter(Boolean).join(' ') || userProfile.email,
+      group: (userProfile.disciplines || []).join(', '),
+      subgroup: '', status: userProfile.status || 'active', ts: Date.now()
+    };
+    await db.ref('fts_forum/users/'+uid).set(userData);
+  }
+  db.ref('fts_forum/users/'+uid+'/status').on('value', snap => {
+    if(snap.exists()){ userData.status = snap.val(); updateStatusUI(); buildForumItems(); renderForumList(); }
+  });
+}
+
+function updateStatusUI(){
+  document.getElementById('pending-bar').classList.toggle('show', userData?.status === 'pending' && userProfile?.role !== 'admin');
+}
+
+async function loadCSV(){
+  try{
+    const resp = await FTS.fetch(FTS.SHEETS.ressources + '&_t=' + Date.now());
+    const text = await resp.text();
+    const lines = text.trim().split(/\r?\n/);
+    const map = new Map();
+    for(let i=1;i<lines.length;i++){
+      const cols = parseCSVLine(lines[i]);
+      const cat = (cols[0]||'').trim();
+      const sub = (cols[1]||'').trim();
+      if(!cat) continue;
+      if(!map.has(cat)) map.set(cat, { category:cat, subs:[] });
+      if(sub && !map.get(cat).subs.some(s => norm(s.name) === norm(sub))) map.get(cat).subs.push({ name:sub });
+    }
+    csvStructure = Array.from(map.values());
+  }catch(e){ console.warn('[FTS Forum] CSV', e); csvStructure = []; }
+  csvLoaded = true;
+  buildForumItems(); renderForumList(document.getElementById('forum-search')?.value || '');
+}
+
+function buildForumItems(){
+  if(!userData && !userProfile) return;
+  const isAdmin = userProfile?.role === 'admin';
+  const isActive = userData?.status === 'active' || isAdmin;
+  const userGroupNorms = isAdmin ? null : (userData?.group || '').split(', ').filter(Boolean).map(norm);
+  const userSubNorms = isAdmin ? null : (userData?.subgroup || '').split(', ').filter(Boolean).map(norm);
+  const items = [{
+    id:'general', type:'channel', icon:'💬', name:'Général', desc:'Discussion ouverte à tous', preview:'Canal commun à tous les membres'
+  }];
+  if(isActive){
+    if(csvStructure.length){
+      for(const cat of csvStructure){
+        const catNorm = norm(cat.category);
+        const userHasCat = isAdmin || userGroupNorms?.includes(catNorm);
+        const visibleSubs = isAdmin ? cat.subs : cat.subs.filter(s => userSubNorms?.includes(norm(s.name)));
+        if(!userHasCat && !visibleSubs.length) continue;
+        const channels = [];
+        if(userHasCat) channels.push({ id:catNorm, icon:catIcon(cat.category), name:'Général '+cat.category, desc:'Discussion générale — '+cat.category });
+        visibleSubs.forEach(sub => channels.push({ id:norm(sub.name), icon:'📅', name:sub.name, desc:'Canal '+sub.name }));
+        items.push({ id:'cat_'+catNorm, type:'category', icon:catIcon(cat.category), name:cat.category, desc:`${channels.length} canal${channels.length>1?'s':''} accessible${channels.length>1?'s':''}`, channels });
+      }
+    }else if(!csvLoaded){
+      items.push({ id:'loading', type:'info', icon:'⏳', name:'Chargement…', desc:'Chargement des catégories' });
+    }else{
+      const groups = (userData?.group || '').split(', ').filter(Boolean);
+      groups.forEach(g => items.push({ id:'cat_'+norm(g), type:'category', icon:catIcon(g), name:g, desc:'Canal '+g, channels:[{id:norm(g), icon:catIcon(g), name:'Général '+g, desc:'Canal '+g}] }));
+    }
+  }
+  forumItems = items;
+}
+
+function renderForumList(q=''){
+  const list = document.getElementById('forum-list'); if(!list) return;
+  const term = q.trim().toLowerCase();
+  let items = forumItems.filter(item => {
+    if(!term) return true;
+    return (item.name||'').toLowerCase().includes(term) || (item.channels||[]).some(c => c.name.toLowerCase().includes(term));
+  });
+  if(!items.length){ list.innerHTML = `<div class="conv-empty"><span class="conv-empty-icon">🔎</span><p>Aucun canal trouvé.</p></div>`; return; }
+  list.innerHTML = items.map(item => {
+    if(item.type === 'channel') return renderChannelBubble(item);
+    if(item.type === 'info') return `<div class="conv-empty"><span class="conv-empty-icon">⏳</span><p>${esc(item.desc)}</p></div>`;
+    const open = openCats[item.id] || term;
+    return `<div class="forum-category-group${open?' open':''}" id="grp-${esc(item.id)}">
+      <div class="conv-item" onclick="toggleCategory('${esc(item.id)}')">
+        <div class="conv-av" style="background:rgba(201,168,76,.18)">${item.icon}</div>
+        <div class="conv-body">
+          <div class="conv-row1"><div class="conv-name">${esc(item.name)}</div><div class="forum-chevron">›</div></div>
+          <div class="conv-row2"><div class="conv-preview">${esc(item.desc)}</div></div>
+        </div>
+      </div>
+      <div class="forum-subchannels">
+        ${(item.channels||[]).map(ch => `<div class="forum-subchannel${ch.id===currentChannel?' active':''}" onclick="selectForumChannel('${esc(ch.id)}','${esc(ch.name)}','${esc(ch.icon)}','${esc(ch.desc)}')"><span class="forum-sub-icon">${ch.icon}</span><span class="forum-sub-name">${esc(ch.name)}</span></div>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderChannelBubble(ch){
+  return `<div class="conv-item${ch.id===currentChannel?' active':''}" onclick="selectForumChannel('${esc(ch.id)}','${esc(ch.name)}','${esc(ch.icon)}','${esc(ch.desc)}')">
+    <div class="conv-av" style="background:rgba(212,32,26,.16)">${ch.icon}</div>
+    <div class="conv-body">
+      <div class="conv-row1"><div class="conv-name">${esc(ch.name)}</div></div>
+      <div class="conv-row2"><div class="conv-preview">${esc(ch.preview || ch.desc || '')}</div></div>
+    </div>
+  </div>`;
+}
+
+function toggleCategory(id){ openCats[id] = !openCats[id]; renderForumList(document.getElementById('forum-search').value || ''); }
+
+function selectForumChannel(id, name, icon, desc){
+  currentChannel = id; lastMsgDate = null;
+  FTSChat.setAvatar(document.getElementById('chat-av'), name, {type:'category', icon});
+  document.getElementById('chat-name').textContent = name;
+  document.getElementById('chat-sub').textContent = desc || '';
+  document.getElementById('chat-empty').style.display = 'none';
+  document.getElementById('chat-zone').classList.add('on');
+  FTSChat.openChat();
+  document.getElementById('messages').innerHTML = '';
+  if(currentListener) currentListener();
+  loadMessages(id);
+  renderForumList(document.getElementById('forum-search').value || '');
+  setTimeout(() => document.getElementById('msg-input').focus(), 200);
+}
+
+function closeChat(){
+  FTSChat.closeChat();
+  document.getElementById('chat-zone').classList.remove('on');
+  document.getElementById('chat-empty').style.display = 'flex';
+  currentChannel = null;
+  if(currentListener){ currentListener(); currentListener = null; }
+  renderForumList(document.getElementById('forum-search').value || '');
+}
+
+function loadMessages(id){
+  const ref = db.ref('fts_forum/messages/'+id).limitToLast(80);
+  ref.on('child_added', snap => addForumMsg(snap.val(), snap.key));
+  ref.on('child_removed', snap => document.getElementById('msg-'+snap.key)?.remove());
+  currentListener = () => ref.off();
+}
+
+function sendMessage(){
+  if(!currentChannel) return;
+  const input = document.getElementById('msg-input');
+  const text = input.value.trim(); if(!text) return;
+  input.value = ''; input.style.height = '';
+  const msg = { uid, name:userData.name || userProfile.name || userProfile.email, text, ts:Date.now() };
+  db.ref('fts_forum/messages/'+currentChannel).push(msg);
+  notifyChannel(currentChannel, msg.name + ' : ' + text.substring(0,80));
+}
+
+function addForumMsg(m, key){
+  const wrap = document.getElementById('messages');
+  const own = (m.uid && m.uid === uid) || (!m.uid && m.name === userData?.name);
+  const dStr = new Date(m.ts).toDateString();
+  if(dStr !== lastMsgDate){
+    lastMsgDate = dStr;
+    const sep = document.createElement('div'); sep.className='day-sep'; sep.innerHTML = `<span>${FTSChat.fmtDay(m.ts)}</span>`; wrap.appendChild(sep);
+  }
+  const div = document.createElement('div'); div.id = 'msg-'+key; div.className = 'msg-wrap ' + (own ? 'own' : 'other');
+  const isMedia = m.text && m.text.startsWith('[media]');
+  const body = isMedia ? renderMedia(m.text.slice(7)) : esc(m.text || '').replace(/\n/g,'<br>');
+  div.innerHTML = `${!own ? `<div class="msg-sender">${esc(m.name || 'Membre')}</div>` : ''}
+    <div class="msg-bubble">${body}<div class="msg-foot"><span class="msg-time">${FTSChat.fmtFull(m.ts)}</span>${own ? '<span class="msg-check">✓✓</span>' : ''}</div></div>
+    ${adminMode ? `<button class="btn-del-msg" onclick="deleteMsg('${key}')">Supprimer</button>` : ''}`;
+  wrap.appendChild(div); FTSChat.scrollBottom();
+}
+
+function deleteMsg(k){ if(confirm('Supprimer ce message ?')) db.ref('fts_forum/messages/'+currentChannel+'/'+k).remove(); }
+function toggleAdminMode(){ if(userProfile?.role !== 'admin') return; adminMode = !adminMode; document.getElementById('admin-bar').classList.toggle('show', adminMode); if(currentChannel) selectForumChannel(currentChannel, document.getElementById('chat-name').textContent, document.getElementById('chat-av').textContent, document.getElementById('chat-sub').textContent); }
+function exitAdmin(){ adminMode = false; document.getElementById('admin-bar').classList.remove('show'); }
+function handleKey(e){ FTSChat.handleEnter(e, sendMessage); }
+function autoResize(el){ FTSChat.autoResize(el); }
+function doSignOut(){ auth.signOut().then(() => location.href='auth.html'); }
+
+function uploadMedia(file){
+  if(!file || !currentChannel) return;
+  if(file.size > 100 * 1024 * 1024){ alert('Fichier trop volumineux (max 100 Mo)'); return; }
+  const bar=document.getElementById('upload-bar'), fill=document.getElementById('upload-fill'), txt=document.getElementById('upload-txt');
+  bar.classList.add('show'); fill.style.width='0%'; txt.textContent='Upload en cours…';
+  FTS.uploadCloudinary(file, pct => { fill.style.width = pct + '%'; txt.textContent = 'Upload ' + pct + '%…'; })
+    .then(url => {
+      txt.textContent = '✓ '+file.name;
+      setTimeout(() => bar.classList.remove('show'), 1600);
+      document.getElementById('file-input').value = '';
+      db.ref('fts_forum/messages/'+currentChannel).push({ uid, name:userData.name, text:'[media]'+url, ts:Date.now() });
+    })
+    .catch(() => { txt.textContent='Erreur upload'; setTimeout(() => bar.classList.remove('show'), 2500); });
+}
+
+function renderMedia(url){
+  const ext = url.split('?')[0].split('.').pop().toLowerCase();
+  const isImg = url.includes('/image/upload/') || ['jpg','jpeg','png','gif','webp'].includes(ext);
+  const isVideo = (url.includes('/video/upload/') && !['mp3','wav','ogg','aac','m4a'].includes(ext)) || ['mp4','mov','webm'].includes(ext);
+  const isAudio = ['mp3','wav','ogg','aac','m4a'].includes(ext);
+  const isPdf = ext === 'pdf';
+  if(isImg) return `<img class="msg-img" src="${esc(url)}" onclick="window.open('${esc(url)}')">`;
+  if(isVideo) return `<video class="msg-video" src="${esc(url)}" controls playsinline></video>`;
+  if(isAudio) return `<audio controls preload="none" style="width:100%;min-width:200px"><source src="${esc(url)}"></audio>`;
+  if(isPdf) return `<a class="msg-pdf" href="${esc(url)}" target="_blank">📄 Ouvrir le PDF</a>`;
+  return `<a class="msg-pdf" href="${esc(url)}" target="_blank">📎 Fichier joint</a>`;
+}
+
+function listenUnreadBadge(uid){
+  db.ref('fts_dm/userConvs/'+uid).on('value', async snap => {
+    const ids = snap.val() ? Object.keys(snap.val()) : []; let total = 0;
+    await Promise.all(ids.map(id => db.ref('fts_dm/conversations/'+id+'/unread/'+uid).once('value').then(s => total += (s.val() || 0))));
+    const el=document.getElementById('msg-badge'); if(!el) return;
+    if(total>0){ el.textContent = total>99?'99+':total; el.style.display='inline-block'; } else el.style.display='none';
+  });
+}
+
+function urlBase64ToUint8Array(b64){ const pad='='.repeat((4-b64.length%4)%4); const raw=atob((b64+pad).replace(/-/g,'+').replace(/_/g,'/')); const arr=new Uint8Array(raw.length); for(let i=0;i<raw.length;i++) arr[i]=raw.charCodeAt(i); return arr; }
+async function getSubscription(){ if(!('serviceWorker' in navigator)) return null; const reg=await navigator.serviceWorker.ready; return reg.pushManager.getSubscription(); }
+async function checkNotifStatus(){ const sub=await getSubscription(); updateNotifBtn(!!sub); }
+function updateNotifBtn(on){ const btn=document.getElementById('btn-notif'); if(!btn) return; btn.textContent = on ? '🔔 Notifs activées' : '🔕 Activer les notifs'; btn.classList.toggle('on', on); }
+async function toggleNotifications(){ const sub=await getSubscription(); if(sub){ await sub.unsubscribe(); fetch(FTS.PUSH.workerUrl+'/unsubscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({uid})}).catch(()=>{}); updateNotifBtn(false); } else await subscribePush(); }
+async function subscribePush(){ try{ const perm=await Notification.requestPermission(); if(perm!=='granted'){ alert('Autorise les notifications pour continuer.'); return; } const reg=await navigator.serviceWorker.ready; const sub=await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:urlBase64ToUint8Array(FTS.PUSH.vapidPublicKey)}); await fetch(FTS.PUSH.workerUrl+'/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({uid, subscription:sub.toJSON(), group:userData?.group||'', subgroup:userData?.subgroup||''})}); updateNotifBtn(true); }catch(e){ alert('Erreur notifications : '+e.message); } }
+function notifyChannel(channel, body){ let group='', subgroup=''; (userData?.group||'').split(', ').forEach(g=>{ if(norm(g)===channel) group=g; }); (userData?.subgroup||'').split(', ').forEach(s=>{ if(norm(s)===channel) subgroup=s; }); fetch(FTS.PUSH.workerUrl+'/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({group, subgroup, title:'FTS — Forum', body, url:'/forum.html', senderUid:uid})}).catch(()=>{}); }
+</script>
+<script src="assets/js/fts-pwa.js"></script>
+</body>
+</html>
