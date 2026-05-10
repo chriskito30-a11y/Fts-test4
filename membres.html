@@ -572,15 +572,11 @@ button.profile-pill:hover {
     <div class="quick-actions" aria-label="Accès rapides">
       <a href="messages.html" class="quick-card">
         <span class="quick-ico">✉️</span>
-        <span><span class="quick-title">Messages</span><span class="quick-sub">Discussions privées</span></span>
+        <span class="quick-title">Messages</span>
       </a>
       <a href="forum.html" class="quick-card">
         <span class="quick-ico">💬</span>
-        <span><span class="quick-title">Forum</span><span class="quick-sub">Groupes et catégories</span></span>
-      </a>
-      <a href="https://chat.whatsapp.com/LR1kAuTfxioL0Q1v13wHHO" target="_blank" rel="noopener" class="quick-card">
-        <span class="quick-ico">🟢</span>
-        <span><span class="quick-title">WhatsApp</span><span class="quick-sub">Groupe FTS</span></span>
+        <span class="quick-title">Forum</span>
       </a>
     </div>
 
@@ -646,7 +642,6 @@ button.profile-pill:hover {
 
 /* ── CONFIG CATÉGORIES ──────────────────────────────────────── */
 const C = {
-  whatsapp: "https://chat.whatsapp.com/LR1kAuTfxioL0Q1v13wHHO",
   categories: [
     { icon:"🎭", name:"Theatre",          subcats:["7/9 ans","10/12 ans","13/15 ans","Impro","10/17 ans - Lundi","Adultes - Lundi","Adultes - Vendredi"], whatsapp:"" },
     { icon:"🎤", name:"Chant",            subcats:[], whatsapp:"" },
@@ -871,13 +866,6 @@ async function showCat(i) {
                `<button class="subcat-tag" onclick="filtDocs(${j+1},${i},this)">${FTS.esc(s)}</button>`
              ).join('')}
            </div>`;
-  }
-
-  if (cat.whatsapp) {
-    h += `<a href="${cat.whatsapp}" target="_blank" rel="noopener"
-             class="btn-whatsapp" style="margin-bottom:.8rem">
-            💬 Rejoindre le groupe WhatsApp
-          </a>`;
   }
 
   h += `<input type="search" id="srch-${i}" class="search-input"
