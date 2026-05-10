@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/css/fts-chat.css?v=4">
+<link rel="stylesheet" href="./assets/css/fts-chat.css?v=8">
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
@@ -90,44 +90,9 @@ window.addEventListener("orientationchange", () => setTimeout(setH, 200));
   </div>
 </div>
 
-<script src="assets/js/fts-utils.js"></script>
-<script src="assets/js/fts-firebase.js"></script>
-<script src="assets/js/fts-chat.js?v=4"></script>
-<script>
-/* Fallback anti-cache : évite une redirection si fts-chat.js est absent ou servi depuis un ancien cache */
-window.FTSChat = window.FTSChat || {};
-(function(Chat){
-  Chat.avColor = Chat.avColor || function(s){
-    const colors=["#d4201a","#c9a84c","#8b5cf6","#06b6d4","#22c55e","#f97316"];
-    s=String(s||"?"); let h=0; for(let i=0;i<s.length;i++) h=s.charCodeAt(i)+((h<<5)-h);
-    return colors[Math.abs(h)%colors.length];
-  };
-  Chat.setAvatar = Chat.setAvatar || function(el,label,opts={}){
-    if(!el) return;
-    if(opts.type === "group" || opts.type === "category"){
-      el.textContent = opts.icon || "👥";
-      el.style.background = "rgba(201,168,76,.22)";
-      el.style.color = "#c9a84c";
-      return;
-    }
-    el.textContent = String(label||"?").trim().charAt(0).toUpperCase() || "?";
-    el.style.background = Chat.avColor(label||"?");
-    el.style.color = "#fff";
-  };
-  Chat.fmtTs = Chat.fmtTs || function(ts){ return ts ? new Date(ts).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}) : ""; };
-  Chat.fmtFull = Chat.fmtFull || Chat.fmtTs;
-  Chat.fmtDay = Chat.fmtDay || function(ts){
-    const d=new Date(ts), n=new Date();
-    if(d.toDateString()===n.toDateString()) return "Aujourd'hui";
-    return d.toLocaleDateString("fr-FR",{day:"2-digit",month:"long",year:"numeric"});
-  };
-  Chat.openChat = Chat.openChat || function(){ document.getElementById("app")?.classList.add("chat-open"); };
-  Chat.closeChat = Chat.closeChat || function(){ document.getElementById("app")?.classList.remove("chat-open"); };
-  Chat.autoResize = Chat.autoResize || function(el){ if(!el) return; el.style.height="auto"; el.style.height=Math.min(el.scrollHeight,140)+"px"; };
-  Chat.handleEnter = Chat.handleEnter || function(e,cb){ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); cb(); } };
-  Chat.scrollBottom = Chat.scrollBottom || function(id="messages"){ const el=document.getElementById(id); if(el) el.scrollTop=el.scrollHeight; };
-})(window.FTSChat);
-</script>
+<script src="./assets/js/fts-utils.js"></script>
+<script src="./assets/js/fts-firebase.js"></script>
+<script src="./assets/js/fts-chat.js?v=8"></script>
 <script>
 /* ================================================================
    FORUM.JS — version factorisée visuellement avec Messages
@@ -370,7 +335,6 @@ function toggleAdminMode(){ if(userProfile?.role !== 'admin') return; adminMode 
 function exitAdmin(){ adminMode = false; document.getElementById('admin-bar').classList.remove('show'); }
 function handleKey(e){ FTSChat.handleEnter(e, sendMessage); }
 function autoResize(el){ FTSChat.autoResize(el); }
-function doSignOut(){ auth.signOut().then(() => location.href='auth.html'); }
 
 function uploadMedia(file){
   if(!file || !currentChannel) return;
