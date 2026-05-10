@@ -302,6 +302,178 @@
   color: var(--muted);
   letter-spacing: .1em;
 }
+
+
+/* ── TABLEAU DE BORD MEMBRE ─────────────────────────────────── */
+.member-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-bottom: 1.8rem;
+}
+
+.welcome-card {
+  background: linear-gradient(135deg, rgba(212,32,26,.12), rgba(201,168,76,.07));
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: var(--r-lg);
+  padding: 1.4rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.welcome-card::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: linear-gradient(var(--red), var(--gold));
+}
+
+.welcome-kicker {
+  font-size: .6rem;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: .35rem;
+}
+
+.welcome-title {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  letter-spacing: .03em;
+  line-height: 1;
+  margin-bottom: .45rem;
+}
+
+.welcome-title span { color: var(--red); }
+
+.welcome-sub {
+  color: var(--muted);
+  font-size: .84rem;
+  line-height: 1.6;
+}
+
+.profile-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  margin-top: 1rem;
+}
+
+.profile-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .35rem .65rem;
+  border-radius: 999px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  color: var(--white);
+  font-size: .72rem;
+}
+
+.profile-pill.role {
+  color: var(--gold);
+  border-color: rgba(201,168,76,.25);
+  background: rgba(201,168,76,.08);
+}
+
+.dash-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: .75rem;
+}
+
+.dash-card {
+  background: var(--grey);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 1rem;
+  min-height: 92px;
+}
+
+.dash-label {
+  font-size: .57rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: .45rem;
+}
+
+.dash-value {
+  font-family: var(--font-display);
+  font-size: 1.45rem;
+  line-height: 1;
+  color: var(--white);
+}
+
+.dash-value.small {
+  font-family: var(--font-body);
+  font-size: .82rem;
+  line-height: 1.45;
+  color: var(--white);
+}
+
+.dash-note {
+  font-size: .68rem;
+  color: var(--muted);
+  margin-top: .35rem;
+}
+
+.quick-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: .75rem;
+  margin-bottom: 1.5rem;
+}
+
+.quick-card {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  background: #141414;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: .95rem;
+  color: var(--white);
+  text-decoration: none;
+  transition: all .2s;
+}
+
+.quick-card:hover {
+  border-color: rgba(212,32,26,.45);
+  transform: translateY(-1px);
+}
+
+.quick-ico { font-size: 1.35rem; }
+.quick-title { font-size: .86rem; font-weight: 500; }
+.quick-sub { font-size: .68rem; color: var(--muted); margin-top: .15rem; }
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 2rem 0 1rem;
+}
+
+.section-head-title {
+  font-family: var(--font-display);
+  font-size: 1.55rem;
+  letter-spacing: .03em;
+}
+
+.section-head-sub {
+  font-size: .75rem;
+  color: var(--muted);
+  margin-top: .2rem;
+}
+
+@media (max-width: 720px) {
+  .dash-grid, .quick-actions { grid-template-columns: 1fr; }
+  .welcome-title { font-size: 1.65rem; }
+}
+
 </style>
 </head>
 
@@ -345,17 +517,58 @@
   <div class="wrap">
 
     <!-- En-tête -->
-    <div class="page-hdr">
+    <div class="page-hdr" style="margin-bottom:1.4rem">
       <div class="eyebrow">Association culturelle</div>
-      <h1>FAIS TON<br><span>SHOW</span></h1>
+      <h1>ESPACE<br><span>MEMBRES</span></h1>
       <div class="title-line"></div>
-      <p class="page-slogan">Espace réservé aux membres</p>
+      <p class="page-slogan">Ton tableau de bord Fais Ton Show</p>
     </div>
 
-    <!-- Barre utilisateur -->
-    <div class="user-bar">
-      <div class="user-name">Bonjour, <strong id="user-display-name">…</strong></div>
-      <button class="btn-signout" onclick="doSignOut()">Déconnexion</button>
+    <!-- Tableau de bord -->
+    <section class="member-dashboard" aria-label="Tableau de bord membre">
+      <div class="welcome-card">
+        <div class="welcome-kicker">Bienvenue</div>
+        <div class="welcome-title">Bonjour, <span id="user-display-name">…</span></div>
+        <div class="welcome-sub" id="welcome-sub">Retrouve ici tes ressources, tes événements et tes espaces d’échange.</div>
+        <div class="profile-pills" id="profile-pills"></div>
+      </div>
+
+      <div class="dash-grid">
+        <div class="dash-card">
+          <div class="dash-label">Mes disciplines</div>
+          <div class="dash-value" id="dash-disc-count">–</div>
+          <div class="dash-note" id="dash-disc-note">Chargement…</div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-label">Prochain événement</div>
+          <div class="dash-value small" id="dash-next-event">Chargement…</div>
+          <div class="dash-note" id="dash-next-event-date"></div>
+        </div>
+        <div class="dash-card">
+          <div class="dash-label">Messages non lus</div>
+          <div class="dash-value" id="dash-msg-count">0</div>
+          <div class="dash-note">Messages privés</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Annonce dynamique -->
+    <div class="annonce" id="annonce-dyn" style="display:none"></div>
+
+    <!-- Accès rapides -->
+    <div class="quick-actions" aria-label="Accès rapides">
+      <a href="messages.html" class="quick-card">
+        <span class="quick-ico">✉️</span>
+        <span><span class="quick-title">Messages</span><span class="quick-sub">Discussions privées</span></span>
+      </a>
+      <a href="forum.html" class="quick-card">
+        <span class="quick-ico">💬</span>
+        <span><span class="quick-title">Forum</span><span class="quick-sub">Groupes et catégories</span></span>
+      </a>
+      <a href="https://chat.whatsapp.com/LR1kAuTfxioL0Q1v13wHHO" target="_blank" rel="noopener" class="quick-card">
+        <span class="quick-ico">🟢</span>
+        <span><span class="quick-title">WhatsApp</span><span class="quick-sub">Groupe FTS</span></span>
+      </a>
     </div>
 
     <!-- Section événements -->
@@ -369,18 +582,14 @@
       </div>
     </div>
 
-    <!-- Annonce dynamique -->
-    <div class="annonce" id="annonce-dyn" style="display:none"></div>
-
-    <!-- Bouton WhatsApp -->
-    <a href="https://chat.whatsapp.com/LR1kAuTfxioL0Q1v13wHHO"
-       target="_blank" rel="noopener"
-       class="btn-whatsapp" style="margin-bottom:1.5rem">
-      💬 Rejoindre le groupe WhatsApp
-    </a>
-
     <!-- Grille catégories -->
-    <div class="cats-title">Espace membres</div>
+    <div class="section-head">
+      <div>
+        <div class="section-head-title">Mes ressources</div>
+        <div class="section-head-sub">Documents, audios, vidéos et contenus partagés par discipline</div>
+      </div>
+    </div>
+    <div class="cats-title" style="display:none">Espace membres</div>
     <div class="cats-grid" id="cats">
       <button class="cat-btn" data-disc="Theatre"          onclick="openCat(0)"><span class="cat-icon">🎭</span><span class="cat-name">Théâtre</span></button>
       <button class="cat-btn" data-disc="Chant"            onclick="openCat(1)"><span class="cat-icon">🎤</span><span class="cat-name">Chant</span></button>
@@ -503,6 +712,8 @@ const ICONS = {
       document.getElementById('user-display-name').textContent =
         userProfile.firstName || userProfile.name || user.email;
 
+      renderDashboard(userProfile, user.email);
+
       // Liens nav selon rôle
       if (userProfile.role === 'admin') {
         document.getElementById('bnav-profs').style.display = 'flex';
@@ -528,6 +739,62 @@ const ICONS = {
   });
 })();
 
+
+/* ── TABLEAU DE BORD ─────────────────────────────────────────── */
+function renderDashboard(profile, email) {
+  const displayName = profile.firstName || profile.name || email || 'membre';
+  const discs = profile.role === 'admin'
+    ? C.categories.map(c => c.name)
+    : (profile.disciplines || []);
+
+  const roleLabel = profile.role === 'admin' ? 'Admin' : profile.role === 'prof' ? 'Prof' : 'Membre';
+  const roleIcon  = profile.role === 'admin' ? '🛡' : profile.role === 'prof' ? '🎓' : '👤';
+
+  const pills = document.getElementById('profile-pills');
+  if (pills) {
+    const discPills = discs.length
+      ? discs.map(d => {
+          const cat = C.categories.find(c => c.name === d);
+          return `<span class="profile-pill">${cat ? cat.icon : '🎭'} ${FTS.esc(d)}</span>`;
+        }).join('')
+      : '<span class="profile-pill">⏳ Disciplines à valider</span>';
+
+    pills.innerHTML = `<span class="profile-pill role">${roleIcon} ${roleLabel}</span>` + discPills;
+  }
+
+  const discCount = document.getElementById('dash-disc-count');
+  const discNote  = document.getElementById('dash-disc-note');
+  if (discCount) discCount.textContent = profile.role === 'admin' ? 'Tout' : String(discs.length || 0);
+  if (discNote) {
+    discNote.textContent = profile.role === 'admin'
+      ? 'Accès complet'
+      : discs.length ? discs.slice(0, 2).join(' · ') + (discs.length > 2 ? '…' : '') : 'En attente d’attribution';
+  }
+
+  const sub = document.getElementById('welcome-sub');
+  if (sub) {
+    sub.textContent = discs.length
+      ? 'Retrouve tes ressources, tes événements et tes espaces d’échange en un seul endroit.'
+      : 'Ton compte est actif, mais aucune discipline n’est encore associée à ton profil.';
+  }
+}
+
+function updateNextEventSummary(events) {
+  const title = document.getElementById('dash-next-event');
+  const date  = document.getElementById('dash-next-event-date');
+  if (!title || !date) return;
+
+  if (!events || !events.length) {
+    title.textContent = 'Aucun événement';
+    date.textContent  = 'Pour le moment';
+    return;
+  }
+
+  const e = events[0];
+  title.textContent = e.n || 'Événement';
+  date.textContent  = `${e.d || ''}${e.h ? ' · ' + e.h : ''}`;
+}
+
 /* ── FILTRAGE PAR DISCIPLINES ────────────────────────────────── */
 function applyDisciplineFilter(profile) {
   // Admin → voit tout
@@ -537,7 +804,8 @@ function applyDisciplineFilter(profile) {
 
   // Si aucune discipline assignée → tout masquer sauf message
   if (!userDiscs.length) {
-    document.querySelector('.cats-title').textContent = 'Aucune discipline assignée pour le moment.';
+    const sub = document.querySelector('.section-head-sub');
+    if (sub) sub.textContent = 'Aucune discipline assignée pour le moment.';
     document.querySelectorAll('.cat-btn').forEach(btn => {
       btn.classList.add('filtered-out');
     });
@@ -558,6 +826,7 @@ async function loadEvts() {
   const url = FTS.SHEETS.calendrier;
   if (!url) {
     document.getElementById('evts').innerHTML = "<div class='list-loading'>Aucun calendrier configuré</div>";
+    updateNextEventSummary([]);
     return;
   }
   try {
@@ -566,9 +835,11 @@ async function loadEvts() {
       .map(c => ({ n:c[0], t:c[1], d:c[2], h:c[3], l:c[4], u:c[5] }))
       .filter(x => x.n && x.d);
     allEvts = rows;
+    updateNextEventSummary(rows);
     showEvts(rows.slice(0, 3));
   } catch(e) {
     document.getElementById('evts').innerHTML = "<div class='list-loading'>Impossible de charger les événements</div>";
+    updateNextEventSummary([]);
   }
 }
 
@@ -796,6 +1067,9 @@ function listenUnreadBadge(uid) {
 function updateMsgBadge(count) {
   const el = document.getElementById('msg-badge');
   if (!el) return;
+  const dash = document.getElementById('dash-msg-count');
+  if (dash) dash.textContent = count > 99 ? '99+' : String(count);
+
   if (count > 0) {
     el.textContent = count > 99 ? '99+' : count;
     el.style.display = 'inline-block';
