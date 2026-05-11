@@ -666,6 +666,31 @@ const ICONS = {
 };
 
 
+/* ── CHARGEMENT CATÉGORIES FIREBASE ───────────────────────────── */
+async function loadCategories() {
+  try {
+    const structure = FTS.getCategoryStructureAsync
+      ? await FTS.getCategoryStructureAsync(db)
+      : (FTS.getCategoryStructure ? FTS.getCategoryStructure() : []);
+
+    if (Array.isArray(structure) && structure.length) {
+      C.categories = structure
+        .filter(c => c && c.active !== false)
+        .map(c => ({
+          icon: c.icon || c.emoji || FTS.catIcon(c.name || c.category),
+          name: c.name || c.category,
+          subcats: (c.subs || c.subcats || [])
+            .map(s => typeof s === 'string' ? s : (s && (s.name || s.label)))
+            .filter(Boolean),
+          whatsapp: c.whatsapp || ''
+        }))
+        .filter(c => c.name);
+    }
+  } catch(e) {
+    console.warn('[FTS] Catégories Firebase indisponibles :', e);
+  }
+}
+
 /* ── DROITS SOUS-CATÉGORIES MEMBRE ───────────────────────────── */
 function profileIsAdmin() {
   return userProfile && userProfile.role === 'admin';
@@ -733,6 +758,7 @@ function canSeeDocInCategory(doc, cat) {
       document.getElementById('user-display-name').textContent =
         userProfile.firstName || userProfile.name || user.email;
 
+      await loadCategories();
       renderDashboard(userProfile, user.email);
 
       // Liens nav selon rôle
@@ -821,22 +847,46 @@ function applyDisciplineFilter(profile) {
 
 /* ── CHARGEMENT ÉVÉNEMENTS ───────────────────────────────────── */
 async function loadEvts() {
-  const url = FTS.SHEETS.calendrier;
-  if (!url) {
-    document.getElementById('evts').innerHTML = "<div class='list-loading'>Aucun calendrier configuré</div>";
-    updateNextEventSummary([]);
-    return;
-  }
+  const el = document.getElementById('evts');
   try {
-    const res  = await FTS.fetch(url);
-    const rows = FTS.parseCSVRaw(await res.text())
-      .map(c => ({ n:c[0], t:c[1], d:c[2], h:c[3], l:c[4], u:c[5] }))
-      .filter(x => x.n && x.d);
-    allEvts = rows;
-    updateNextEventSummary(rows);
-    showEvts(rows.slice(0, 3));
+    const rows = [];
+
+    // Source unique V1 : Firebase RTDB.
+    // Formats acceptés : fts_events/{id} ou fts_content/calendrier/{id}
+    const snaps = await Promise.all([
+      db.ref('fts_events').once('value').catch(() => null),
+      db.ref('fts_content/calendrier').once('value').catch(() => null)
+    ]);
+
+    snaps.forEach(snap => {
+      if (!snap || !snap.exists()) return;
+      snap.forEach(child => {
+        const v = child.val() || {};
+        if (v.active === false || v.status === 'inactive') return;
+        rows.push({
+          n: v.n || v.name || v.nom || v.title || v.titre || '',
+          t: v.t || v.type || '',
+          d: v.d || v.date || '',
+          h: v.h || v.heure || v.time || '',
+          l: v.l || v.location || v.lieu || '',
+          u: v.u || v.url || v.link || v.lien || '',
+          ts: Number(v.ts || v.dateTs || v.startTs || v.order || 0)
+        });
+      });
+    });
+
+    allEvts = rows
+      .filter(x => x.n && (x.d || x.ts))
+      .sort((a,b) => {
+        if (a.ts || b.ts) return (a.ts || 0) - (b.ts || 0);
+        return String(a.d).localeCompare(String(b.d), 'fr');
+      });
+
+    updateNextEventSummary(allEvts);
+    showEvts(allEvts.slice(0, 3));
   } catch(e) {
-    document.getElementById('evts').innerHTML = "<div class='list-loading'>Impossible de charger les événements</div>";
+    console.warn('[FTS] Événements Firebase indisponibles :', e);
+    if (el) el.innerHTML = "<div class='list-loading'>Impossible de charger les événements</div>";
     updateNextEventSummary([]);
   }
 }
@@ -903,53 +953,44 @@ async function showCat(i) {
   await loadDocs(cat.name, i);
 }
 
-/* ── CHARGEMENT DOCUMENTS (Firebase + Sheets) ────────────────── */
+/* ── CHARGEMENT DOCUMENTS (Firebase uniquement) ──────────────── */
 async function loadDocs(name, idx) {
   const el = document.getElementById('dc-' + idx);
   if (!el) return;
 
   let rows = [];
 
-  // Source 1 : Firebase RTDB (nouveaux docs via profs.html)
+  // Source unique V1 : Firebase RTDB (ressources publiées via profs/admin)
   try {
-    const snap = await db.ref('fts_ressources').orderByChild('cat').equalTo(name).once('value');
+    const snap = await db.ref('fts_ressources').once('value');
     if (snap.exists()) {
       snap.forEach(child => {
-        const d = child.val();
+        const d = child.val() || {};
+        if (d.active === false || d.status === 'inactive') return;
+        const catName = d.cat || d.category || '';
+        if (FTS.norm(catName) !== FTS.norm(name)) return;
         rows.push({
-          cat:  d.cat,
-          sub:  d.subcat || '',
-          name: d.name,
-          url:  d.url || '',
+          cat:  catName,
+          sub:  d.subcat || d.subcategory || '',
+          name: d.name || d.nom || d.title || d.titre || '',
+          url:  d.url || d.content || d.contenu || d.link || d.lien || '',
           type: (d.type || 'doc').toLowerCase().trim(),
           key:  child.key,
-          ts:   d.createdAt || 0,
+          ts:   d.createdAt || d.updatedAt || 0,
         });
       });
     }
-  } catch(e) {}
-
-  // Source 2 : Google Sheets (docs existants/legacy)
-  if (FTS.SHEETS.ressources) {
-    try {
-      const res  = await FTS.fetch(FTS.SHEETS.ressources);
-      const sheetRows = FTS.parseCSVRaw(await res.text())
-        .map(c => ({
-          cat:  c[0], sub: c[1], name: c[2],
-          url:  c[3], type: (c[4] || 'doc').toLowerCase().trim(),
-          key:  null, ts: 0,
-        }))
-        .filter(x => x.cat && x.name && x.cat.toLowerCase() === name.toLowerCase());
-      rows = rows.concat(sheetRows);
-    } catch(e) {}
+  } catch(e) {
+    console.warn('[FTS] Ressources Firebase indisponibles :', e);
   }
 
-  // Dédoublonnage par nom + élimination doublons Sheets/Firebase
+  // Dédoublonnage par nom + catégorie
   const seen = new Set();
   const deduped = rows
-    .sort((a, b) => b.ts - a.ts) // Firebase en premier (plus récent)
+    .filter(r => r.name)
+    .sort((a, b) => b.ts - a.ts)
     .filter(r => {
-      const k = r.name.trim().toLowerCase() + r.cat.toLowerCase();
+      const k = FTS.norm(r.name) + '|' + FTS.norm(r.cat) + '|' + FTS.norm(r.sub || '');
       if (seen.has(k)) return false;
       seen.add(k); return true;
     });
@@ -1029,20 +1070,29 @@ document.getElementById('mo').addEventListener('click', function(e) {
 
 /* ── ANNONCE DYNAMIQUE ───────────────────────────────────────── */
 async function loadAnnonce() {
-  const el  = document.getElementById('annonce-dyn');
-  const url = FTS.SHEETS.annonces;
-  if (!el || !url) return;
+  const el = document.getElementById('annonce-dyn');
+  if (!el) return;
 
   try {
-    const res   = await FTS.fetch(url);
-    const rows  = FTS.parseCSVRaw(await res.text());
-    const lines = rows.map(c => c[0] || '').filter(Boolean);
-    if (lines.length) {
-      el.innerHTML     = lines.map(FTS.esc).join('<br>');
-      el.style.display = '';
-    }
+    const snap = await db.ref('fts_content/annonces/current').once('value');
+    const a = snap.val() || {};
+    if (a.active === false || a.status === 'inactive') return;
+
+    const title = a.title || a.titre || '';
+    const body  = a.body || a.text || a.texte || '';
+    const btn   = a.buttonText || a.btn || '';
+    const url   = a.buttonUrl || a.url || '';
+
+    if (!title && !body) return;
+
+    el.innerHTML = `
+      ${title ? `<strong>${FTS.esc(title)}</strong><br>` : ''}
+      ${body ? FTS.esc(body).replace(/\n/g, '<br>') : ''}
+      ${btn && url ? `<br><a href="${FTS.esc(url)}" class="evt-link" style="display:inline-block;margin-top:.6rem">${FTS.esc(btn)}</a>` : ''}
+    `;
+    el.style.display = '';
   } catch(e) {
-    // Annonce optionnelle — ignoré silencieusement
+    console.warn('[FTS] Annonce Firebase indisponible :', e);
   }
 }
 
