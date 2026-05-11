@@ -330,6 +330,18 @@
               <div class="upload-progress-text" id="progress-text">Upload en cours…</div>
             </div>
           </div>
+          <p id="video-upload-tip" style="
+  margin-top:.7rem;
+  font-size:.72rem;
+  color:var(--muted);
+  line-height:1.5;
+  display:none;
+">
+  🎥 Pour les vidéos longues :
+  utilisez <strong>YouTube non répertorié</strong> ou
+  <strong>Google Drive</strong>,
+  puis collez simplement le lien.
+          </p>
           <input type="file" id="f-file" style="display:none"
             accept=".pdf,.mp3,.mp4,.jpg,.jpeg,.png,.gif,.doc,.docx,.ppt,.pptx">
         </div>
@@ -643,6 +655,8 @@ function updateType() {
     pdf:"Lien Google Drive (PDF)", mp3:"Lien audio",
     video:"Lien YouTube ou Drive", image:"Lien image", doc:"Lien",
   };
+  document.getElementById("video-upload-tip").style.display =
+  t === "video" ? "block" : "none";
   document.getElementById("url-label").textContent = labels[t] || "Lien";
 }
 
