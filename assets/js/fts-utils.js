@@ -236,10 +236,95 @@ FTS.CATEGORIES = [
   { icon:"🎨", name:"Atelier",          subcats:[] },
 ];
 
-FTS.getCategoryStructure = function() {
-  return (FTS.CATEGORIES || []).map(c => ({
-    category: c.name,
-    icon: c.icon,
-    subs: (c.subcats || []).map(name => ({ name }))
+
+/* ── CATALOGUE DYNAMIQUE FIREBASE ──────────────────────────────── */
+FTS.DEFAULT_CATEGORIES = FTS.CATEGORIES || [];
+
+FTS.mergeCategoryStructures = function(...sources) {
+  const map = new Map();
+  function addCat(name, icon, subcats, order, active=true) {
+    if (!name || active === false) return;
+    const key = FTS.norm(name);
+    if (!map.has(key)) map.set(key, { name, icon: icon || FTS.catIcon(name), subcats: [], order: order || 999 });
+    const cat = map.get(key);
+    if (icon) cat.icon = icon;
+    if (order !== undefined && order !== null) cat.order = order;
+    (subcats || []).forEach(sub => {
+      if (sub && typeof sub === 'object' && sub.active === false) return;
+      const subName = typeof sub === 'string' ? sub : (sub && (sub.name || sub.label));
+      if (subName && !cat.subcats.some(x => FTS.norm(x) === FTS.norm(subName))) cat.subcats.push(subName);
+    });
+  }
+  sources.forEach(src => {
+    if (!src) return;
+    if (Array.isArray(src)) {
+      src.forEach(c => addCat(c.name || c.category || c.cat, c.icon, c.subcats || c.subs, c.order, c.active));
+    } else {
+      Object.values(src).forEach(c => {
+        if (!c) return;
+        let subs = c.subcats || c.subs || [];
+        if (!Array.isArray(subs) && typeof subs === 'object') subs = Object.values(subs).map(x => typeof x === 'string' ? x : (x && (x.name || x.label)));
+        addCat(c.name || c.category || c.cat, c.icon, subs, c.order, c.active);
+      });
+    }
+  });
+  return Array.from(map.values()).sort((a,b)=>(a.order||999)-(b.order||999) || a.name.localeCompare(b.name, 'fr'));
+};
+
+FTS.getCategoryStructure = function(categories) {
+  const source = categories || FTS.DEFAULT_CATEGORIES || FTS.CATEGORIES || [];
+  return source.map(c => ({
+    category: c.name || c.category || c.cat,
+    icon: c.icon || FTS.catIcon(c.name || c.category || c.cat),
+    subs: (c.subcats || c.subs || []).map(s => ({ name: typeof s === 'string' ? s : (s && (s.name || s.label)) })).filter(s => s.name)
   }));
+};
+
+FTS.getCategoryStructureAsync = async function(db) {
+  let dyn = null, fromResources = [];
+  try {
+    const snap = await db.ref('fts_content/categories').once('value');
+    dyn = snap.val();
+  } catch(e) {}
+  try {
+    const snap = await db.ref('fts_ressources').once('value');
+    if (snap.exists()) snap.forEach(child => {
+      const r = child.val() || {};
+      if (r.active === false || r.status === 'inactive') return;
+      const name = r.cat || r.category;
+      const sub = r.subcat || r.subcategory;
+      if (name) fromResources.push({ name, icon: FTS.catIcon(name), subcats: sub ? [sub] : [] });
+    });
+  } catch(e) {}
+  const hasDyn = dyn && Object.keys(dyn).length;
+  const merged = hasDyn
+    ? FTS.mergeCategoryStructures(dyn, fromResources)
+    : FTS.mergeCategoryStructures(FTS.DEFAULT_CATEGORIES, fromResources);
+  return FTS.getCategoryStructure(merged);
+};
+
+FTS.categoryOptionsFromStructure = function(structure) {
+  return (structure || []).map(c => ({
+    value: c.category,
+    label: (c.icon || FTS.catIcon(c.category)) + ' ' + c.category,
+    icon: c.icon || FTS.catIcon(c.category),
+    subcats: (c.subs || []).map(s => s.name).filter(Boolean)
+  }));
+};
+
+FTS.ensureResourceCategory = async function(db, data) {
+  const cat = data.cat || data.category;
+  const sub = data.subcat || data.subcategory;
+  if (!db || !cat) return;
+  const catKey = FTS.norm(cat);
+  const upd = {};
+  upd['fts_content/categories/' + catKey + '/name'] = cat;
+  upd['fts_content/categories/' + catKey + '/icon'] = FTS.catIcon(cat);
+  upd['fts_content/categories/' + catKey + '/active'] = true;
+  upd['fts_content/categories/' + catKey + '/updatedAt'] = Date.now();
+  if (sub) {
+    const subKey = FTS.norm(sub);
+    upd['fts_content/categories/' + catKey + '/subcats/' + subKey] = { name: sub, active: true, updatedAt: Date.now() };
+  }
+  await db.ref().update(upd);
 };
