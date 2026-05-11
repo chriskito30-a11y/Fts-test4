@@ -1,4 +1,4 @@
-const CACHE = 'fts-v6';
+const CACHE = 'fts-v7-account';
 const FILES = [
   './manifest.json',
   './assets/img/fts192.png',
