@@ -665,6 +665,41 @@ const ICONS = {
   pdf:"▩",
 };
 
+
+/* ── DROITS SOUS-CATÉGORIES MEMBRE ───────────────────────────── */
+function profileIsAdmin() {
+  return userProfile && userProfile.role === 'admin';
+}
+
+function normList(arr) {
+  return (Array.isArray(arr) ? arr : String(arr || '').split(','))
+    .map(x => String(x || '').trim())
+    .filter(Boolean);
+}
+
+function userDisciplines() {
+  return normList(userProfile && (userProfile.disciplines || userProfile.group));
+}
+
+function userSubgroups() {
+  return normList(userProfile && (userProfile.subgroups || userProfile.subcategories || userProfile.subgroup));
+}
+
+function allowedSubcatsForCategory(cat) {
+  const all = Array.isArray(cat && cat.subcats) ? cat.subcats : [];
+  if (profileIsAdmin()) return all;
+  const allowedNorms = new Set(userSubgroups().map(FTS.norm));
+  return all.filter(s => allowedNorms.has(FTS.norm(s)));
+}
+
+function canSeeDocInCategory(doc, cat) {
+  if (profileIsAdmin()) return true;
+  const docSub = String(doc.sub || '').trim();
+  if (!docSub) return true; // document général de la discipline
+  const allowedNorms = new Set(allowedSubcatsForCategory(cat).map(FTS.norm));
+  return allowedNorms.has(FTS.norm(docSub));
+}
+
 /* ── INITIALISATION ──────────────────────────────────────────── */
 (function init() {
   db = FTS.initFirebase();
@@ -689,9 +724,6 @@ const ICONS = {
         window.location.href = 'auth.html';
         return;
       }
-
-      // Charger les catégories dynamiques depuis Firebase AVANT d'afficher le dashboard
-      await loadDynamicCategories();
 
       // ✅ Accès autorisé — afficher la page
       document.getElementById('auth-loading').style.display  = 'none';
@@ -729,56 +761,24 @@ const ICONS = {
 })();
 
 
-
-/* ── CATÉGORIES DYNAMIQUES FIREBASE ───────────────────────────── */
-async function loadDynamicCategories() {
-  try {
-    const structure = FTS.getCategoryStructureAsync
-      ? await FTS.getCategoryStructureAsync(db)
-      : (FTS.getCategoryStructure ? FTS.getCategoryStructure() : []);
-
-    if (structure && structure.length) {
-      C.categories = structure.map(c => ({
-        icon: c.icon || FTS.catIcon(c.category),
-        name: c.category,
-        subcats: (c.subs || []).map(s => s.name).filter(Boolean),
-        whatsapp: ''
-      }));
-    }
-  } catch(e) {
-    console.warn('[FTS Membres] Catégories Firebase indisponibles, fallback local.', e);
-  }
-}
-
-function findCategoryIndexByName(name) {
-  const wanted = FTS.norm(name || '');
-  return C.categories.findIndex(c => FTS.norm(c.name) === wanted);
-}
-
 /* ── TABLEAU DE BORD ─────────────────────────────────────────── */
 function renderDashboard(profile, email) {
   const displayName = profile.firstName || profile.name || email || 'membre';
-
-  // Admin : toutes les catégories Firebase. Membre/prof : disciplines attribuées au profil.
   const discs = profile.role === 'admin'
     ? C.categories.map(c => c.name)
-    : (profile.disciplines || profile.group || []);
-
-  const discList = Array.isArray(discs)
-    ? discs
-    : String(discs || '').split(',').map(x => x.trim()).filter(Boolean);
+    : (profile.disciplines || []);
 
   const roleLabel = profile.role === 'admin' ? 'Admin' : profile.role === 'prof' ? 'Prof' : 'Membre';
   const roleIcon  = profile.role === 'admin' ? '🛡' : profile.role === 'prof' ? '🎓' : '👤';
 
   const pills = document.getElementById('profile-pills');
   if (pills) {
-    const discPills = discList.length
-      ? discList.map(d => {
-          const idx = findCategoryIndexByName(d);
+    const discPills = discs.length
+      ? discs.map(d => {
+          const idx = C.categories.findIndex(c => c.name === d);
           const cat = idx >= 0 ? C.categories[idx] : null;
           const label = cat ? cat.name : d;
-          const icon = cat ? cat.icon : FTS.catIcon(label);
+          const icon = cat ? cat.icon : '🎭';
           if (idx < 0) return `<span class="profile-pill">${icon} ${FTS.esc(label)}</span>`;
           return `<button type="button" class="profile-pill" onclick="openCat(${idx})" aria-label="Ouvrir les ressources ${FTS.esc(label)}">${icon} ${FTS.esc(label)}</button>`;
         }).join('')
@@ -787,9 +787,10 @@ function renderDashboard(profile, email) {
     pills.innerHTML = `<span class="profile-pill role">${roleIcon} ${roleLabel}</span>` + discPills;
   }
 
+
   const sub = document.getElementById('welcome-sub');
   if (sub) {
-    sub.textContent = discList.length
+    sub.textContent = discs.length
       ? 'Retrouve tes ressources, tes événements et tes espaces d’échange en un seul endroit.'
       : 'Ton compte est actif, mais aucune discipline n’est encore associée à ton profil.';
   }
@@ -879,11 +880,13 @@ async function showCat(i) {
 
   let h = '';
 
-  if (cat.subcats && cat.subcats.length) {
+  const visibleSubcats = allowedSubcatsForCategory(cat);
+
+  if (visibleSubcats.length) {
     h += `<div class="sub-label">Sections</div>
            <div class="subcat-group">
              <button class="subcat-tag all-btn act" onclick="filtDocs(0,${i},this)">Tout</button>
-             ${cat.subcats.map((s,j) =>
+             ${visibleSubcats.map((s,j) =>
                `<button class="subcat-tag" onclick="filtDocs(${j+1},${i},this)">${FTS.esc(s)}</button>`
              ).join('')}
            </div>`;
@@ -900,47 +903,61 @@ async function showCat(i) {
   await loadDocs(cat.name, i);
 }
 
-/* ── CHARGEMENT DOCUMENTS (Firebase) ─────────────────────────── */
+/* ── CHARGEMENT DOCUMENTS (Firebase + Sheets) ────────────────── */
 async function loadDocs(name, idx) {
   const el = document.getElementById('dc-' + idx);
   if (!el) return;
 
   let rows = [];
 
+  // Source 1 : Firebase RTDB (nouveaux docs via profs.html)
   try {
-    const snap = await db.ref('fts_ressources').once('value');
+    const snap = await db.ref('fts_ressources').orderByChild('cat').equalTo(name).once('value');
     if (snap.exists()) {
       snap.forEach(child => {
-        const d = child.val() || {};
-        if (d.active === false || d.status === 'inactive') return;
-        const catName = d.cat || d.category || '';
-        if (FTS.norm(catName) !== FTS.norm(name)) return;
+        const d = child.val();
         rows.push({
-          cat:  catName || name,
-          sub:  d.subcat || d.subcategory || '',
-          name: d.name || d.title || 'Sans titre',
-          url:  d.url || d.content || d.text || '',
+          cat:  d.cat,
+          sub:  d.subcat || '',
+          name: d.name,
+          url:  d.url || '',
           type: (d.type || 'doc').toLowerCase().trim(),
           key:  child.key,
-          ts:   d.createdAt || d.updatedAt || 0,
+          ts:   d.createdAt || 0,
         });
       });
     }
-  } catch(e) {
-    console.warn('[FTS Membres] Impossible de charger les ressources Firebase', e);
+  } catch(e) {}
+
+  // Source 2 : Google Sheets (docs existants/legacy)
+  if (FTS.SHEETS.ressources) {
+    try {
+      const res  = await FTS.fetch(FTS.SHEETS.ressources);
+      const sheetRows = FTS.parseCSVRaw(await res.text())
+        .map(c => ({
+          cat:  c[0], sub: c[1], name: c[2],
+          url:  c[3], type: (c[4] || 'doc').toLowerCase().trim(),
+          key:  null, ts: 0,
+        }))
+        .filter(x => x.cat && x.name && x.cat.toLowerCase() === name.toLowerCase());
+      rows = rows.concat(sheetRows);
+    } catch(e) {}
   }
 
+  // Dédoublonnage par nom + élimination doublons Sheets/Firebase
   const seen = new Set();
   const deduped = rows
-    .sort((a, b) => b.ts - a.ts)
+    .sort((a, b) => b.ts - a.ts) // Firebase en premier (plus récent)
     .filter(r => {
-      const k = (r.name || '').trim().toLowerCase() + FTS.norm(r.cat || '');
+      const k = r.name.trim().toLowerCase() + r.cat.toLowerCase();
       if (seen.has(k)) return false;
       seen.add(k); return true;
     });
 
-  allDocs[idx] = deduped;
-  showDocs(deduped, idx);
+  const cat = C.categories[idx];
+  const allowedDocs = deduped.filter(d => canSeeDocInCategory(d, cat));
+  allDocs[idx] = allowedDocs;
+  showDocs(allowedDocs, idx);
 }
 
 /* ── AFFICHAGE DOCUMENTS ─────────────────────────────────────── */
@@ -985,7 +1002,8 @@ function filtDocs(si, idx, el) {
 
   const cat      = C.categories[idx];
   const docs     = allDocs[idx] || [];
-  const filtered = si === 0 ? docs : docs.filter(x => FTS.norm(x.sub) === FTS.norm(cat.subcats[si - 1]));
+  const visibleSubcats = allowedSubcatsForCategory(cat);
+  const filtered = si === 0 ? docs : docs.filter(x => FTS.norm(x.sub) === FTS.norm(visibleSubcats[si - 1] || ''));
   showDocs(filtered, idx);
 }
 
@@ -1011,25 +1029,18 @@ document.getElementById('mo').addEventListener('click', function(e) {
 
 /* ── ANNONCE DYNAMIQUE ───────────────────────────────────────── */
 async function loadAnnonce() {
-  const el = document.getElementById('annonce-dyn');
-  if (!el) return;
+  const el  = document.getElementById('annonce-dyn');
+  const url = FTS.SHEETS.annonces;
+  if (!el || !url) return;
 
   try {
-    const snap = await db.ref('fts_content/annonces/current').once('value');
-    const a = snap.val();
-    const now = Date.now();
-    if (!a || a.active === false) return;
-    if (a.startAt && now < Number(a.startAt)) return;
-    if (a.endAt && now > Number(a.endAt)) return;
-
-    const body = a.body || a.text || '';
-    if (!body.trim()) return;
-    const title = a.title ? `<strong>${FTS.esc(a.title)}</strong><br>` : '';
-    const button = a.buttonText && a.buttonUrl
-      ? `<br><a class="evt-link" href="${FTS.esc(a.buttonUrl)}">${FTS.esc(a.buttonText)}</a>`
-      : '';
-    el.innerHTML = title + FTS.esc(body).replace(/\n/g, '<br>') + button;
-    el.style.display = '';
+    const res   = await FTS.fetch(url);
+    const rows  = FTS.parseCSVRaw(await res.text());
+    const lines = rows.map(c => c[0] || '').filter(Boolean);
+    if (lines.length) {
+      el.innerHTML     = lines.map(FTS.esc).join('<br>');
+      el.style.display = '';
+    }
   } catch(e) {
     // Annonce optionnelle — ignoré silencieusement
   }

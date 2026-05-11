@@ -542,13 +542,15 @@ function renderMembers() {
 ─────────────────────────────────────────────────────────────── */
 async function syncForumUser(id, statusOverride) {
   const u = allUsers[id] || {};
+  const subgroups = Array.isArray(u.subgroups) ? u.subgroups : String(u.subgroup || '').split(',').map(x => x.trim()).filter(Boolean);
   await db.ref("fts_forum/users/" + id).update({
-    name:     u.name || "Membre",
-    group:    u.group || "",
-    subgroup: u.subgroup || "",
-    role:     u.role || "member",
-    status:   statusOverride || u.status || "active",
-    ts:       Date.now(),
+    name:      u.name || "Membre",
+    group:     u.group || "",
+    subgroup:  subgroups.join(", "),
+    subgroups: subgroups,
+    role:      u.role || "member",
+    status:    statusOverride || u.status || "active",
+    ts:        Date.now(),
   });
 }
 
@@ -654,15 +656,18 @@ async function saveModification() {
 
   // ✅ Forum profile (canaux forum.html)
   await db.ref("fts_forum/users/" + id).update({
-    group:    cats.join(", "),
-    subgroup: subs.join(", "),
-    status:   "active",
-    role:     role,
+    group:     cats.join(", "),
+    subgroup:  subs.join(", "),
+    subgroups: subs,
+    status:    "active",
+    role:      role,
   });
 
-  // ✅ Profil principal (catégories membres.html + statut auth + rôle)
+  // ✅ Profil principal (membres.html + messages + statut auth + rôle)
   await db.ref("fts_users/" + id).update({
     disciplines: cats,
+    subgroups:   subs,
+    subgroup:    subs.join(", "),
     status:      "active",
     role:        role,
   });
