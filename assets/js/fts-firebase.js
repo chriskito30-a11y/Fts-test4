@@ -37,14 +37,15 @@ FTS.PUSH = {
 };
 
 
-/* ── SHEETS URLS ───────────────────────────────────────────────── */
-
-FTS.SHEETS = {
-  inscriptions: "https://docs.google.com/spreadsheets/d/e/2PACX-1vS27ZR5nQD9snZ3mNaeIxOjxyHlpWEnhKl7APAY4OZsSOiIxqyrNQ6ENLWl_A-evRtoqVxy62QUm1in/pub?gid=627892990&single=true&output=csv",
-  calendrier:   "https://docs.google.com/spreadsheets/d/e/2PACX-1vS27ZR5nQD9snZ3mNaeIxOjxyHlpWEnhKl7APAY4OZsSOiIxqyrNQ6ENLWl_A-evRtoqVxy62QUm1in/pub?gid=1103465332&single=true&output=csv",
-  annonces:     "https://docs.google.com/spreadsheets/d/e/2PACX-1vS27ZR5nQD9snZ3mNaeIxOjxyHlpWEnhKl7APAY4OZsSOiIxqyrNQ6ENLWl_A-evRtoqVxy62QUm1in/pub?gid=207525678&single=true&output=csv",
-  ressources:   "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ6zQRcJLBGzmnrMQcFnnfiUwNTUbFTmL3Cg3Wv9HP6p9DXIVHlNdLd07a-QETaHX5NQ4mUr78lx_ox/pub?gid=199619478&single=true&output=csv",
-};
+/* ── SOURCES DE DONNÉES ───────────────────────────────────────────
+   Firebase Realtime Database est désormais la source unique V1.
+   Les anciennes URLs Google Sheets CSV ont été supprimées :
+   - ressources/documents
+   - annonces
+   - questionnaire
+   - calendrier
+   Les pages lisent directement les chemins Firebase correspondants.
+   ──────────────────────────────────────────────────────────────── */
 
 
 /* ── APPS SCRIPT ───────────────────────────────────────────────── */
