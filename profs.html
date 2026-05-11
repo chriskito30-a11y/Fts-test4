@@ -711,8 +711,10 @@ async function doSubmit() {
     };
 
     const ref = await db.ref("fts_ressources").push(data);
+    data.key = ref.key;
     await FTS.ensureResourceCategory(db, data);
     await buildCatSelectors();
+    await notifyNewResource(data);
 
     showMsg("✓ Publié avec succès !", "success");
     resetForm();
@@ -733,6 +735,119 @@ function resetForm() {
   document.getElementById("upload-progress").style.display = "none";
   document.getElementById("progress-bar").style.width   = "0%";
   document.getElementById("subcat-row").style.display   = "none";
+}
+
+
+/* ── NOTIFICATIONS NOUVEAU DOCUMENT ──────────────────────────── */
+function splitAccessList(v) {
+  if (Array.isArray(v)) return v.map(x => String(x || '').trim()).filter(Boolean);
+  return String(v || '').split(',').map(x => x.trim()).filter(Boolean);
+}
+
+function normAccess(v) {
+  return FTS.norm ? FTS.norm(v || '') : String(v || '').toLowerCase().trim();
+}
+
+function resourceTargetPayload(data) {
+  const cat = data.cat || data.category || "";
+  const subcat = data.subcat || data.subcategory || "";
+  return {
+    group: cat,
+    subgroup: subcat || "",
+    category: cat,
+    subcategory: subcat
+  };
+}
+
+function userCanReceiveResourceNotification(u, target) {
+  if (!u || u.status !== "active") return false;
+  if (u.role === "admin") return true;
+
+  const cats = splitAccessList(u.disciplines && u.disciplines.length ? u.disciplines : u.group);
+  const hasCat = cats.some(c => normAccess(c) === normAccess(target.category));
+  if (!hasCat) return false;
+
+  // Document publié directement dans la discipline : tous les membres de cette discipline sont concernés.
+  if (!target.subcategory) return true;
+
+  // Document publié dans une section : uniquement les membres qui possèdent cette section.
+  const byCat = u.subgroupsByCat || {};
+  const matchingCatKey = Object.keys(byCat).find(k => normAccess(k) === normAccess(target.category));
+  const exactCatSubs = splitAccessList(matchingCatKey ? byCat[matchingCatKey] : []);
+  const globalSubs = splitAccessList(u.subgroups && u.subgroups.length ? u.subgroups : u.subgroup);
+  const allowedSubs = exactCatSubs.length ? exactCatSubs : globalSubs;
+  return allowedSubs.some(s => normAccess(s) === normAccess(target.subcategory));
+}
+
+async function getResourceRecipientUids(target) {
+  const snap = await db.ref("fts_users").orderByChild("status").equalTo("active").once("value");
+  const uids = [];
+  if (snap.exists()) {
+    snap.forEach(child => {
+      if (child.key === currentUserUid) return;
+      if (userCanReceiveResourceNotification(child.val(), target)) uids.push(child.key);
+    });
+  }
+  return uids;
+}
+
+async function notifyNewResource(data) {
+  try {
+    if (!FTS.PUSH || !FTS.PUSH.workerUrl) return;
+    const target = resourceTargetPayload(data);
+    const recipientUids = await getResourceRecipientUids(target);
+    if (!recipientUids.length) return;
+
+    const catLabel = target.subcategory ? (target.category + " — " + target.subcategory) : target.category;
+    const url = "./membres.html?resource=" + encodeURIComponent(data.key || "")
+      + "&cat=" + encodeURIComponent(target.category || "")
+      + "&subcat=" + encodeURIComponent(target.subcategory || "");
+
+    // Trace interne utile pour audit / debug, sans bloquer la publication.
+    const notif = {
+      type: "resource",
+      resourceId: data.key || "",
+      cat: target.category,
+      category: target.category,
+      subcat: target.subcategory,
+      subcategory: target.subcategory,
+      title: "Nouveau document",
+      body: data.name || "Nouveau document",
+      url,
+      read: false,
+      createdAt: Date.now(),
+      authorUid: currentUserUid
+    };
+    const fanout = {};
+    recipientUids.forEach(uid => {
+      const nref = db.ref("fts_user_notifications/" + uid).push();
+      fanout["fts_user_notifications/" + uid + "/" + nref.key] = notif;
+    });
+    await db.ref().update(fanout).catch(() => {});
+
+    await fetch(FTS.PUSH.workerUrl + "/notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        uid: recipientUids.length === 1 ? recipientUids[0] : undefined,
+        uids: recipientUids,
+        recipientUids,
+        group: target.group,
+        subgroup: target.subgroup,
+        category: target.category,
+        subcategory: target.subcategory,
+        type: "resource",
+        resourceId: data.key || "",
+        title: "FTS — Nouveau document",
+        body: (data.name || "Nouveau document") + (catLabel ? " · " + catLabel : ""),
+        url,
+        tag: "resource-" + (data.key || Date.now()),
+        senderUid: currentUserUid
+      })
+    });
+  } catch(e) {
+    console.warn("[FTS Profs] Notification document non envoyée", e);
+  }
 }
 
 /* ── CHARGEMENT DOCUMENTS ─────────────────────────────────────── */

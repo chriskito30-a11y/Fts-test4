@@ -1,11 +1,12 @@
-const CACHE = 'fts-v8-notifs';
+const CACHE = 'fts-v10-resource-notifs';
 const FILES = [
   './manifest.json',
   './assets/img/fts192.png',
   './assets/img/fts512.png',
   './membres.html',
   './forum.html',
-  './messages.html'
+  './messages.html',
+  './profs.html'
 ];
 
 self.addEventListener('install', e => {
@@ -40,7 +41,7 @@ self.addEventListener('fetch', e => {
 });
 
 function normalizeNotificationUrl(rawUrl){
-  const fallback = './forum.html';
+  const fallback = './membres.html';
   try {
     const base = self.location.origin + self.location.pathname.replace(/\/[^/]*$/, '/');
     return new URL(rawUrl || fallback, base).href;
@@ -51,16 +52,16 @@ function normalizeNotificationUrl(rawUrl){
 
 // ═══ NOTIFICATIONS PUSH ═══════════════════════════
 self.addEventListener('push', function(event) {
-  let data = { title: 'Fais Ton Show', body: 'Nouveau message', url: './forum.html' };
+  let data = { title: 'Fais Ton Show', body: 'Nouvelle notification', url: './membres.html' };
   try { if (event.data) data = event.data.json(); } catch(e) {}
   const url = normalizeNotificationUrl(data.url);
   event.waitUntil(
     self.registration.showNotification(data.title || 'Fais Ton Show', {
-      body: data.body || 'Nouveau message',
+      body: data.body || 'Nouvelle notification',
       icon: './assets/img/fts192.png',
       badge: './assets/img/fts192.png',
       vibrate: [200, 100, 200],
-      tag: data.tag || data.conversationId || data.channel || 'fts-notification',
+      tag: data.tag || data.resourceId || data.messageId || data.conversationId || data.channel || 'fts-notification',
       renotify: true,
       data: { ...data, url }
     })
