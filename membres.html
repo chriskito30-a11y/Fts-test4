@@ -879,12 +879,12 @@ async function loadDocs(name, idx) {
     if (snap.exists()) {
       snap.forEach(child => {
         const d = child.val();
-        if (d.active === false) return;
+        if (d.active === false || d.status === 'inactive') return;
         rows.push({
-          cat:  d.cat,
-          sub:  d.subcat || '',
+          cat:  d.cat || d.category || name,
+          sub:  d.subcat || d.subcategory || '',
           name: d.name,
-          url:  d.url || '',
+          url:  d.url || d.content || '',
           type: (d.type || 'doc').toLowerCase().trim(),
           key:  child.key,
           ts:   d.createdAt || 0,

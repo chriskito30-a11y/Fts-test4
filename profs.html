@@ -445,24 +445,9 @@
    ✅ Profs voient leurs disciplines, admins voient tout
    ================================================================ */
 
-const SUBCATS = {
-  Theatre:            ["7/9 ans","10/12 ans","13/15 ans","Impro","10/17 ans - Lundi","Adultes - Lundi","Adultes - Vendredi"],
-  Danse:              ["Les Baby Show","Show Danse Junior","Ados / Adultes"],
-  Musique:            ["Guitare","Basse","Batterie","Piano","Formation Musicale"],
-  "Singer Academy":   ["Loisir","Spectacle"],
-  "Comedie Musicale": ["Kids","Enfants","Adultes"],
-};
-
-const ALL_CATS = [
-  { value:"Theatre",          label:"🎭 Théâtre" },
-  { value:"Chant",            label:"🎤 Chant" },
-  { value:"Danse",            label:"💃 Danse" },
-  { value:"Musique",          label:"🎸 Musique" },
-  { value:"Singer Academy",   label:"⭐ Singer Academy" },
-  { value:"Comedie Musicale", label:"🎬 Comédie Musicale" },
-  { value:"Singer Show",      label:"🌟 Singer Show" },
-  { value:"Atelier",          label:"🎨 Atelier" },
-];
+let categoryStructure = [];
+let SUBCATS = {};
+let ALL_CATS = [];
 
 const TYPE_ICONS = { pdf:"▩", mp3:"♪", audio:"♪", video:"▶", image:"▪", texte:"✉", doc:"□" };
 
@@ -516,8 +501,8 @@ window.addEventListener("DOMContentLoaded", function() {
       // Badge non lus messages
       listenUnreadBadge(user.uid);
 
-      // Construire les sélecteurs de catégories
-      buildCatSelectors();
+      // Construire les sélecteurs de catégories depuis Firebase
+      await buildCatSelectors();
 
       // Charger les documents
       loadDocs();
@@ -549,7 +534,18 @@ function allowedCats() {
   return ALL_CATS.filter(c => discs.includes(c.value));
 }
 
-function buildCatSelectors() {
+async function buildCatSelectors() {
+  categoryStructure = FTS.getCategoryStructureAsync
+    ? await FTS.getCategoryStructureAsync(db)
+    : (FTS.getCategoryStructure ? FTS.getCategoryStructure() : []);
+
+  ALL_CATS = FTS.categoryOptionsFromStructure
+    ? FTS.categoryOptionsFromStructure(categoryStructure)
+    : [];
+
+  SUBCATS = {};
+  ALL_CATS.forEach(c => { SUBCATS[c.value] = c.subcats || []; });
+
   const cats = allowedCats();
   const opts = '<option value="">-- Choisir --</option>' +
     cats.map(c => `<option value="${FTS.esc(c.value)}">${FTS.esc(c.label)}</option>`).join("");
@@ -557,7 +553,6 @@ function buildCatSelectors() {
   document.getElementById("f-cat").innerHTML = opts;
   document.getElementById("e-cat").innerHTML = opts;
 
-  // Filtre gestion
   document.getElementById("filter-cat").innerHTML =
     '<option value="">Toutes les catégories</option>' +
     cats.map(c => `<option value="${FTS.esc(c.value)}">${FTS.esc(c.label)}</option>`).join("");
@@ -656,32 +651,29 @@ async function doSubmit() {
   clearMsg();
 
   try {
+    const content = type === "texte" ? text : url;
     const data = {
       cat,
+      category:   cat,
       subcat:     subcat || "",
+      subcategory: subcat || "",
       name,
-      url:        type === "texte" ? text : url,
+      url:        content,
+      content,
       type,
       text:       type !== "texte" ? text : "",
+      active:     true,
+      status:     "active",
+      visibility: "members",
       authorUid:  currentUserUid,
       authorName: userProfile.name || userProfile.firstName || "",
       createdAt:  Date.now(),
+      updatedAt:  Date.now(),
     };
 
-    // ✅ Firebase RTDB — source principale
-    await db.ref("fts_ressources").push(data);
-
-    // ✅ Apps Script Google Sheets — backup/compat
-    const scriptUrl = (window.FTS && FTS.SCRIPT)
-      ? FTS.SCRIPT.publication
-      : "https://script.google.com/macros/s/AKfycby0VF50V2UGWLZ-65GeeeHlibSrZhqqcx1IHQ8-bkrGmsxCBO3hkYZrMiCnE1GqTgEBNg/exec";
-
-    // Double publication si note séparée
-    const mainUrl = type === "texte" ? text : url;
-    if (text && type !== "texte") {
-      fetch(scriptUrl + "?cat=" + encodeURIComponent(cat) + "&subcat=" + encodeURIComponent(subcat) + "&name=" + encodeURIComponent(name + " - Note") + "&url=" + encodeURIComponent(text) + "&type=texte").catch(() => {});
-    }
-    fetch(scriptUrl + "?cat=" + encodeURIComponent(cat) + "&subcat=" + encodeURIComponent(subcat) + "&name=" + encodeURIComponent(name) + "&url=" + encodeURIComponent(mainUrl) + "&type=" + encodeURIComponent(type)).catch(() => {});
+    const ref = await db.ref("fts_ressources").push(data);
+    await FTS.ensureResourceCategory(db, data);
+    await buildCatSelectors();
 
     showMsg("✓ Publié avec succès !", "success");
     resetForm();
@@ -714,9 +706,10 @@ function loadDocs() {
         // Profs voient seulement leurs disciplines
         if (userProfile.role !== "admin") {
           const discs = userProfile.disciplines || [];
-          if (!discs.includes(d.cat)) return;
+          const dcat = d.cat || d.category;
+          if (!discs.includes(dcat)) return;
         }
-        allDocs.unshift({ ...d, key: child.key }); // plus récent en premier
+        allDocs.unshift({ ...d, cat: d.cat || d.category || "", subcat: d.subcat || d.subcategory || "", url: d.url || d.content || "", key: child.key }); // plus récent en premier
       });
     }
     document.getElementById("manage-count").textContent = allDocs.length;
@@ -749,7 +742,7 @@ function renderDocs() {
 
   el.innerHTML = filteredDocs.map(d => {
     const icon = TYPE_ICONS[d.type] || "□";
-    const date = new Date(d.createdAt).toLocaleDateString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric" });
+    const date = d.createdAt ? new Date(d.createdAt).toLocaleDateString("fr-FR", { day:"2-digit", month:"2-digit", year:"numeric" }) : "—";
     const isAdmin = userProfile.role === "admin";
 
     return `<div class="doc-item">
@@ -819,10 +812,20 @@ async function saveEdit() {
   if (!cat || !name) { alert("Catégorie et titre requis."); return; }
 
   try {
-    await db.ref("fts_ressources/" + key).update({
-      cat, subcat: subcat || "", type, name, url, text,
+    const data = {
+      cat, category: cat,
+      subcat: subcat || "", subcategory: subcat || "",
+      type, name,
+      url, content: url,
+      text,
+      active: true,
+      status: "active",
+      visibility: "members",
       updatedAt: Date.now(),
-    });
+    };
+    await db.ref("fts_ressources/" + key).update(data);
+    await FTS.ensureResourceCategory(db, data);
+    await buildCatSelectors();
     closeEditModal();
   } catch(e) {
     alert("Erreur lors de la modification.");

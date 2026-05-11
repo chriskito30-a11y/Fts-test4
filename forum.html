@@ -184,7 +184,7 @@ function updateStatusUI(){
 
 async function loadCSV(){
   try{
-    csvStructure = FTS.getCategoryStructure ? FTS.getCategoryStructure() : [];
+    csvStructure = FTS.getCategoryStructureAsync ? await FTS.getCategoryStructureAsync(db) : (FTS.getCategoryStructure ? FTS.getCategoryStructure() : []);
   }catch(e){ console.warn('[FTS Forum] Structure catégories', e); csvStructure = []; }
   csvLoaded = true;
   buildForumItems(); renderForumList(document.getElementById('forum-search')?.value || '');

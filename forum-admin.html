@@ -418,12 +418,13 @@ function doLogout() {
 /* ── CHARGEMENT GROUPES ──────────────────────────────────────── */
 async function loadGroups() {
   allGroups = [];
-  if (FTS.CATEGORIES) {
-    FTS.CATEGORIES.forEach(c => {
-      allGroups.push({ cat: c.name, sub: '' });
-      (c.subcats || []).forEach(sub => allGroups.push({ cat: c.name, sub }));
-    });
-  }
+  const structure = FTS.getCategoryStructureAsync
+    ? await FTS.getCategoryStructureAsync(db)
+    : (FTS.getCategoryStructure ? FTS.getCategoryStructure() : []);
+  structure.forEach(c => {
+    allGroups.push({ cat: c.category, sub: '' });
+    (c.subs || []).forEach(sub => allGroups.push({ cat: c.category, sub: sub.name }));
+  });
 }
 
 /* ── ÉCOUTE TEMPS RÉEL ───────────────────────────────────────── */
