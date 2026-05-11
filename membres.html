@@ -548,11 +548,6 @@ button.profile-pill:hover {
 
       <div class="dash-grid">
         <div class="dash-card">
-          <div class="dash-label">Mes disciplines</div>
-          <div class="dash-value" id="dash-disc-count">–</div>
-          <div class="dash-note" id="dash-disc-note">Chargement…</div>
-        </div>
-        <div class="dash-card">
           <div class="dash-label">Prochain événement</div>
           <div class="dash-value small" id="dash-next-event">Chargement…</div>
           <div class="dash-note" id="dash-next-event-date"></div>
@@ -757,14 +752,6 @@ function renderDashboard(profile, email) {
     pills.innerHTML = `<span class="profile-pill role">${roleIcon} ${roleLabel}</span>` + discPills;
   }
 
-  const discCount = document.getElementById('dash-disc-count');
-  const discNote  = document.getElementById('dash-disc-note');
-  if (discCount) discCount.textContent = profile.role === 'admin' ? 'Tout' : String(discs.length || 0);
-  if (discNote) {
-    discNote.textContent = profile.role === 'admin'
-      ? 'Accès complet'
-      : discs.length ? discs.slice(0, 2).join(' · ') + (discs.length > 2 ? '…' : '') : 'En attente d’attribution';
-  }
 
   const sub = document.getElementById('welcome-sub');
   if (sub) {
