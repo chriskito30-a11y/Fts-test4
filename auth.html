@@ -458,14 +458,21 @@ async function doRegister() {
     };
     await db.ref('fts_users/' + uid).set(profile);
 
-    // Synchronisation profil forum (fts_forum/users — compatibilité forum.html)
-    await db.ref('fts_forum/users/' + uid).set({
-      name:     first + ' ' + last,
-      group:    [...selectedDisc].join(', '),
-      subgroup: '',
-      status:   isAdmin ? 'active' : 'pending',
-      ts:       Date.now(),
-    });
+    // Synchronisation profil forum (compatibilité forum.html).
+    // Avec les règles sécurisées, un compte pending peut ne pas avoir le droit d'écrire ici :
+    // ce n'est pas bloquant, l'admin forum lira la demande depuis fts_users puis synchronisera à la validation.
+    try {
+      await db.ref('fts_forum/users/' + uid).set({
+        name:     first + ' ' + last,
+        group:    [...selectedDisc].join(', '),
+        subgroup: '',
+        status:   isAdmin ? 'active' : 'pending',
+        role:     isAdmin ? 'admin' : 'member',
+        ts:       Date.now(),
+      });
+    } catch(syncErr) {
+      console.warn('[FTS Auth] Synchro forum différée :', syncErr);
+    }
 
     // → onAuthStateChanged prend le relais (pending ou membres.html)
 

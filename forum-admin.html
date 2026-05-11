@@ -294,7 +294,7 @@
       <div class="dash-sub">Admin Forum</div>
     </div>
     <div class="dash-actions">
-      <a class="btn-admin-link" href="contenus-admin.html">🧩 Admin contenus</a><a class="btn-admin-link" href="saison-admin.html">📅 Admin saison</a>
+      <a class="btn-admin-link" href="saison-admin.html">📅 Admin saison</a>
       <button class="btn-logout" onclick="doLogout()">Déconnexion</button>
     </div>
   </div>
@@ -418,19 +418,58 @@ function doLogout() {
 /* ── CHARGEMENT GROUPES ──────────────────────────────────────── */
 async function loadGroups() {
   allGroups = [];
-  const structure = FTS.getCategoryStructureAsync
-    ? await FTS.getCategoryStructureAsync(db)
-    : (FTS.getCategoryStructure ? FTS.getCategoryStructure() : []);
-  structure.forEach(c => {
-    allGroups.push({ cat: c.category, sub: '' });
-    (c.subs || []).forEach(sub => allGroups.push({ cat: c.category, sub: sub.name }));
-  });
+  try {
+    const snap = await db.ref("fts_content/categories").once("value");
+    const cats = snap.val() || {};
+    Object.keys(cats).forEach(key => {
+      const cat = cats[key] || {};
+      if (cat.active === false) return;
+      const catName = cat.name || key;
+      allGroups.push({ cat: catName, sub: "" });
+      const subcats = cat.subcats || {};
+      Object.keys(subcats).forEach(sk => {
+        const sub = subcats[sk] || {};
+        if (sub.active === false) return;
+        if (sub.name) allGroups.push({ cat: catName, sub: sub.name });
+      });
+    });
+  } catch(e) {
+    console.warn("[FTS Admin] Catégories Firebase indisponibles", e);
+  }
+}
+
+function normalizeAdminUser(id, u) {
+  u = u || {};
+  const disciplines = Array.isArray(u.disciplines)
+    ? u.disciplines
+    : String(u.group || "").split(",").map(x => x.trim()).filter(Boolean);
+  const subgroups = Array.isArray(u.subgroups)
+    ? u.subgroups
+    : String(u.subgroup || "").split(",").map(x => x.trim()).filter(Boolean);
+  return {
+    uid: id,
+    name: u.name || [u.firstName, u.lastName].filter(Boolean).join(" ") || u.email || "Membre",
+    email: u.email || "",
+    firstName: u.firstName || "",
+    lastName: u.lastName || "",
+    role: u.role || "member",
+    status: u.status || "pending",
+    group: disciplines.join(", "),
+    subgroup: subgroups.join(", "),
+    disciplines,
+    subgroups,
+    ts: u.createdAt || u.ts || Date.now(),
+  };
 }
 
 /* ── ÉCOUTE TEMPS RÉEL ───────────────────────────────────────── */
 function listenUsers() {
-  db.ref("fts_forum/users").on("value", function(snap) {
-    allUsers = snap.val() || {};
+  // Source officielle : fts_users.
+  // Les nouveaux inscrits pending y sont créés immédiatement, même si la synchro forum est bloquée par les règles.
+  db.ref("fts_users").on("value", function(snap) {
+    const raw = snap.val() || {};
+    allUsers = {};
+    Object.keys(raw).forEach(id => { allUsers[id] = normalizeAdminUser(id, raw[id]); });
     renderPending();
     renderMembers();
   });
@@ -501,23 +540,35 @@ function renderMembers() {
    ✅ Double écriture : fts_forum/users + fts_users
    C'est ce qui synchronise membres.html et forum.html
 ─────────────────────────────────────────────────────────────── */
+async function syncForumUser(id, statusOverride) {
+  const u = allUsers[id] || {};
+  await db.ref("fts_forum/users/" + id).update({
+    name:     u.name || "Membre",
+    group:    u.group || "",
+    subgroup: u.subgroup || "",
+    role:     u.role || "member",
+    status:   statusOverride || u.status || "active",
+    ts:       Date.now(),
+  });
+}
+
 async function approveUser(id) {
-  // Forum : statut actif
-  await db.ref("fts_forum/users/" + id + "/status").set("active");
-  // Espace membre : statut actif (débloque l'accès auth.html → membres.html)
+  // Source officielle : fts_users
   await db.ref("fts_users/" + id + "/status").set("active");
+  // Compatibilité forum : création/mise à jour du profil forum au moment de la validation
+  await syncForumUser(id, "active");
 }
 
 async function refuseUser(id) {
   if (!confirm("Refuser cet utilisateur ?")) return;
-  await db.ref("fts_forum/users/" + id + "/status").set("refused");
   await db.ref("fts_users/" + id + "/status").set("refused");
+  await syncForumUser(id, "refused");
 }
 
 async function revokeUser(id) {
   if (!confirm("Révoquer cet utilisateur ?")) return;
-  await db.ref("fts_forum/users/" + id + "/status").set("refused");
   await db.ref("fts_users/" + id + "/status").set("refused");
+  await syncForumUser(id, "refused");
 }
 
 /* ── RÔLES ───────────────────────────────────────────────────── */
