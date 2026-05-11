@@ -40,6 +40,7 @@ window.addEventListener("orientationchange", () => setTimeout(setH, 200));
 .msg-act.danger:hover { color: var(--red); border-color: rgba(212,32,26,.45); }
 .msg-edited { font-size: .58rem; color: rgba(245,242,238,.32); margin-left: .25rem; }
 @media (max-width: 720px) { .msg-actions { display: flex; } }
+.notif-target .msg-bubble{outline:2px solid rgba(201,168,76,.75); box-shadow:0 0 0 6px rgba(201,168,76,.14);}
 </style>
 </head>
 </head>
@@ -73,6 +74,10 @@ window.addEventListener("orientationchange", () => setTimeout(setH, 200));
         <span class="conv-empty-icon">✉️</span>
         <p>Aucune conversation.<br>Commence un message !</p>
       </div>
+    </div>
+
+    <div class="notif-mini">
+      <button class="btn-notif" id="btn-notif" onclick="toggleNotifications()">🔕 Activer les notifs</button>
     </div>
 
     <nav class="sb-nav">
@@ -165,6 +170,7 @@ let db, auth, me, myUid;
 let allUsers = {}, allConvs = [];
 let currentConvId = null, currentListener = null;
 let convType = "direct", selectedUids = new Set(), lastMsgDate = null;
+let deepLinkConvId = null, deepLinkMsgId = null, deepLinkHandled = false;
 
 /* Couleurs avatars déterministes */
 function avColor(s){ return FTSChat.avColor(s); }
@@ -172,6 +178,10 @@ function setAv(el, name, isGroup){ FTSChat.setAvatar(el, name, { type: isGroup ?
 
 /* ── INIT ────────────────────────────────────────────────────── */
 window.addEventListener("DOMContentLoaded", () => {
+  if("serviceWorker" in navigator){ navigator.serviceWorker.register("./sw.js", {scope:"./"}).catch(()=>{}); }
+  const params = new URLSearchParams(location.search || "");
+  deepLinkConvId = params.get("conv");
+  deepLinkMsgId = params.get("msg");
   db   = FTS.initFirebase();
   auth = firebase.auth();
 
@@ -192,6 +202,8 @@ window.addEventListener("DOMContentLoaded", () => {
 
       await loadUsers();
       listenConvs();
+      checkNotifStatus();
+      openMessageDeepLink();
     }catch(e){ console.warn("[FTS Msg]", e); showBootError(e); }
   });
 });
@@ -322,20 +334,25 @@ async function sendMessage(){
   const text  = input.value.trim(); if(!text) return;
   input.value = ""; input.style.height = "";
   const msg = { senderId:myUid, senderName:me.name||me.email, text, ts:Date.now() };
-  await db.ref("fts_dm/messages/"+currentConvId).push(msg);
-  const ps = (await db.ref("fts_dm/conversations/"+currentConvId+"/participants").once("value")).val()||{};
+  const msgRef = await db.ref("fts_dm/messages/"+currentConvId).push(msg);
+  const convSnap = await db.ref("fts_dm/conversations/"+currentConvId).once("value");
+  const convData = convSnap.val() || {};
+  const ps = convData.participants || {};
   const upd = {
     ["fts_dm/conversations/"+currentConvId+"/lastMessage"]:    text.substring(0,80),
     ["fts_dm/conversations/"+currentConvId+"/lastSenderName"]: me.name,
     ["fts_dm/conversations/"+currentConvId+"/lastTs"]:         msg.ts,
   };
+  const recipients = [];
   for(const uid of Object.keys(ps)){
     if(uid !== myUid){
+      recipients.push(uid);
       const c = (await db.ref("fts_dm/conversations/"+currentConvId+"/unread/"+uid).once("value")).val()||0;
       upd["fts_dm/conversations/"+currentConvId+"/unread/"+uid] = c+1;
     }
   }
   await db.ref().update(upd);
+  notifyDirectMessage(currentConvId, convData, recipients, text, msgRef.key);
 }
 
 /* ── BULLE ───────────────────────────────────────────────────── */
@@ -507,6 +524,48 @@ async function startConv(){
   }
   closeModal();
   await selectConv(convId);
+}
+
+
+function urlBase64ToUint8Array(b64){ const pad='='.repeat((4-b64.length%4)%4); const raw=atob((b64+pad).replace(/-/g,'+').replace(/_/g,'/')); const arr=new Uint8Array(raw.length); for(let i=0;i<raw.length;i++) arr[i]=raw.charCodeAt(i); return arr; }
+async function getSubscription(){ if(!('serviceWorker' in navigator)) return null; const reg=await navigator.serviceWorker.ready; return reg.pushManager.getSubscription(); }
+async function checkNotifStatus(){ const sub=await getSubscription(); updateNotifBtn(!!sub); }
+function updateNotifBtn(on){ const btn=document.getElementById('btn-notif'); if(!btn) return; btn.textContent = on ? '🔔 Notifs activées' : '🔕 Activer les notifs'; btn.classList.toggle('on', on); }
+async function toggleNotifications(){ const sub=await getSubscription(); if(sub){ await sub.unsubscribe(); fetch(FTS.PUSH.workerUrl+'/unsubscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({uid:myUid})}).catch(()=>{}); updateNotifBtn(false); } else await subscribePush(); }
+async function subscribePush(){
+  try{
+    const perm=await Notification.requestPermission();
+    if(perm!=='granted'){ alert('Autorise les notifications pour continuer.'); return; }
+    const reg=await navigator.serviceWorker.ready;
+    const sub=await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:urlBase64ToUint8Array(FTS.PUSH.vapidPublicKey)});
+    const groups = (me?.group || me?.disciplines?.join(', ') || '').split(',').map(x=>x.trim()).filter(Boolean);
+    const subgroups = (me?.subgroup || '').split(',').map(x=>x.trim()).filter(Boolean);
+    await fetch(FTS.PUSH.workerUrl+'/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({uid:myUid, subscription:sub.toJSON(), group:groups.join(', '), subgroup:subgroups.join(', '), groups, subgroups})});
+    updateNotifBtn(true);
+  }catch(e){ alert('Erreur notifications : '+e.message); }
+}
+function notifyDirectMessage(convId, convData, recipients, text, msgId){
+  if(!recipients || !recipients.length || !FTS.PUSH) return;
+  const isGroup = convData && convData.type === 'group';
+  const title = isGroup ? ('FTS — ' + (convData.name || 'Groupe privé')) : 'FTS — Message privé';
+  const body = (me.name || me.email || 'Membre') + ' : ' + text.substring(0, 90);
+  const url = './messages.html?conv=' + encodeURIComponent(convId) + (msgId ? '&msg=' + encodeURIComponent(msgId) : '');
+  fetch(FTS.PUSH.workerUrl+'/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    type:isGroup ? 'dm_group' : 'dm_direct', uid:recipients[0], uids:recipients, recipients,
+    conversationId:convId, msgId, title, body, url, senderUid:myUid
+  })}).catch(()=>{});
+}
+function openMessageDeepLink(){
+  if(deepLinkHandled || !deepLinkConvId) return;
+  deepLinkHandled = true;
+  selectConv(deepLinkConvId).then(() => {
+    if(deepLinkMsgId){
+      setTimeout(() => {
+        const el = document.getElementById('msg-' + deepLinkMsgId);
+        if(el){ el.scrollIntoView({behavior:'smooth', block:'center'}); el.classList.add('notif-target'); setTimeout(()=>el.classList.remove('notif-target'), 3500); }
+      }, 900);
+    }
+  });
 }
 
 /* ── DATES / HEURES ──────────────────────────────────────────── */

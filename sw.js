@@ -1,9 +1,11 @@
-const CACHE = 'fts-v7-account';
+const CACHE = 'fts-v8-notifs';
 const FILES = [
   './manifest.json',
   './assets/img/fts192.png',
   './assets/img/fts512.png',
-  './membres.html'
+  './membres.html',
+  './forum.html',
+  './messages.html'
 ];
 
 self.addEventListener('install', e => {
@@ -37,29 +39,50 @@ self.addEventListener('fetch', e => {
   );
 });
 
+function normalizeNotificationUrl(rawUrl){
+  const fallback = './forum.html';
+  try {
+    const base = self.location.origin + self.location.pathname.replace(/\/[^/]*$/, '/');
+    return new URL(rawUrl || fallback, base).href;
+  } catch(e) {
+    return new URL(fallback, self.location.href).href;
+  }
+}
+
 // ═══ NOTIFICATIONS PUSH ═══════════════════════════
 self.addEventListener('push', function(event) {
   let data = { title: 'Fais Ton Show', body: 'Nouveau message', url: './forum.html' };
   try { if (event.data) data = event.data.json(); } catch(e) {}
+  const url = normalizeNotificationUrl(data.url);
   event.waitUntil(
-    self.registration.showNotification(data.title, {
-      body: data.body,
+    self.registration.showNotification(data.title || 'Fais Ton Show', {
+      body: data.body || 'Nouveau message',
       icon: './assets/img/fts192.png',
       badge: './assets/img/fts192.png',
       vibrate: [200, 100, 200],
-      data: { url: data.url || './forum.html' }
+      tag: data.tag || data.conversationId || data.channel || 'fts-notification',
+      renotify: true,
+      data: { ...data, url }
     })
   );
 });
 
 self.addEventListener('notificationclick', function(event) {
   event.notification.close();
+  const targetUrl = normalizeNotificationUrl(event.notification.data && event.notification.data.url);
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clientList) {
+      const target = new URL(targetUrl);
       for (const client of clientList) {
-        if (client.url.includes('forum') && 'focus' in client) return client.focus();
+        try {
+          const current = new URL(client.url);
+          if (current.pathname === target.pathname && 'focus' in client) {
+            if ('navigate' in client) return client.navigate(targetUrl).then(c => c ? c.focus() : client.focus());
+            return client.focus();
+          }
+        } catch(e) {}
       }
-      return clients.openWindow(event.notification.data.url);
+      return clients.openWindow(targetUrl);
     })
   );
 });

@@ -17,6 +17,7 @@ function setH(){ document.documentElement.style.setProperty("--vh", window.inner
 setH(); window.addEventListener("resize", setH);
 window.addEventListener("orientationchange", () => setTimeout(setH, 200));
 </script>
+<style>.notif-target .msg-bubble{outline:2px solid rgba(201,168,76,.75); box-shadow:0 0 0 6px rgba(201,168,76,.14);}</style>
 </head>
 <body>
 <div class="auth-loading" id="auth-loading">
@@ -107,6 +108,7 @@ let forumItems = [];
 let openCats = {};
 let currentChannel = null, currentListener = null, lastMsgDate = null;
 let adminMode = false;
+let deepLinkHandled = false;
 
 function norm(s){ return FTS.norm(s); }
 function esc(s){ return FTS.esc(s); }
@@ -140,7 +142,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       FTSChat.setAvatar(document.getElementById('my-avatar'), label);
       listenUnreadBadge(uid);
       checkNotifStatus();
-      buildForumItems(); renderForumList();
+      buildForumItems(); renderForumList(); openForumDeepLink();
     }catch(e){ console.warn('[FTS Forum]', e); showBootError(e); }
   });
 });
@@ -164,7 +166,7 @@ async function loadUserData(){
     await db.ref('fts_forum/users/'+uid).set(userData);
   }
   db.ref('fts_forum/users/'+uid+'/status').on('value', snap => {
-    if(snap.exists()){ userData.status = snap.val(); updateStatusUI(); buildForumItems(); renderForumList(); }
+    if(snap.exists()){ userData.status = snap.val(); updateStatusUI(); buildForumItems(); renderForumList(); openForumDeepLink(); }
   });
 }
 
@@ -177,7 +179,7 @@ async function loadCategoryStructure(){
     categoryStructure = FTS.getCategoryStructureAsync ? await FTS.getCategoryStructureAsync(db) : (FTS.getCategoryStructure ? FTS.getCategoryStructure() : []);
   }catch(e){ console.warn('[FTS Forum] Structure catégories Firebase', e); categoryStructure = []; }
   categoryLoaded = true;
-  buildForumItems(); renderForumList(document.getElementById('forum-search')?.value || '');
+  buildForumItems(); renderForumList(document.getElementById('forum-search')?.value || ''); openForumDeepLink();
 }
 
 function buildForumItems(){
@@ -281,14 +283,14 @@ function loadMessages(id){
   currentListener = () => ref.off();
 }
 
-function sendMessage(){
+async function sendMessage(){
   if(!currentChannel) return;
   const input = document.getElementById('msg-input');
   const text = input.value.trim(); if(!text) return;
   input.value = ''; input.style.height = '';
   const msg = { uid, name:userData.name || userProfile.name || userProfile.email, text, ts:Date.now() };
-  db.ref('fts_forum/messages/'+currentChannel).push(msg);
-  notifyChannel(currentChannel, msg.name + ' : ' + text.substring(0,80));
+  const ref = await db.ref('fts_forum/messages/'+currentChannel).push(msg);
+  notifyChannel(currentChannel, msg.name + ' : ' + text.substring(0,80), ref.key);
 }
 
 function addForumMsg(m, key){
@@ -324,7 +326,8 @@ function uploadMedia(file){
       txt.textContent = '✓ '+file.name;
       setTimeout(() => bar.classList.remove('show'), 1600);
       document.getElementById('file-input').value = '';
-      db.ref('fts_forum/messages/'+currentChannel).push({ uid, name:userData.name, text:'[media]'+url, ts:Date.now() });
+      const mediaMsg = { uid, name:userData.name, text:'[media]'+url, ts:Date.now() };
+      db.ref('fts_forum/messages/'+currentChannel).push(mediaMsg).then(ref => notifyChannel(currentChannel, (userData.name || 'Membre') + ' a envoyé un fichier', ref.key));
     })
     .catch(() => { txt.textContent='Erreur upload'; setTimeout(() => bar.classList.remove('show'), 2500); });
 }
@@ -351,13 +354,77 @@ function listenUnreadBadge(uid){
   });
 }
 
+
+function channelInfoById(channel){
+  if(channel === 'general') return { group:'', subgroup:'', label:'Général' };
+  for(const cat of categoryStructure || []){
+    const catNorm = norm(cat.category);
+    if(catNorm === channel) return { group:cat.category, subgroup:'', label:'Général '+cat.category };
+    for(const sub of (cat.subs || [])){
+      if(norm(sub.name) === channel) return { group:'', subgroup:sub.name, label:sub.name };
+    }
+  }
+  return { group:'', subgroup:'', label:channel };
+}
+
+function findForumChannel(channel){
+  for(const item of forumItems || []){
+    if(item.type === 'channel' && item.id === channel) return item;
+    const ch = (item.channels || []).find(c => c.id === channel);
+    if(ch) return ch;
+  }
+  return null;
+}
+
+function openForumDeepLink(){
+  if(deepLinkHandled || !uid || !forumItems.length) return;
+  const params = new URLSearchParams(location.search || '');
+  const channel = params.get('channel');
+  if(!channel) return;
+  const ch = findForumChannel(channel);
+  if(!ch) return;
+  const parent = (forumItems || []).find(item => (item.channels || []).some(c => c.id === channel));
+  if(parent) openCats[parent.id] = true;
+  deepLinkHandled = true;
+  selectForumChannel(ch.id, ch.name, ch.icon || '💬', ch.desc || '');
+  const msgId = params.get('msg');
+  if(msgId){
+    setTimeout(() => {
+      const el = document.getElementById('msg-' + msgId);
+      if(el){ el.scrollIntoView({behavior:'smooth', block:'center'}); el.classList.add('notif-target'); setTimeout(()=>el.classList.remove('notif-target'), 3500); }
+    }, 900);
+  }
+}
+
 function urlBase64ToUint8Array(b64){ const pad='='.repeat((4-b64.length%4)%4); const raw=atob((b64+pad).replace(/-/g,'+').replace(/_/g,'/')); const arr=new Uint8Array(raw.length); for(let i=0;i<raw.length;i++) arr[i]=raw.charCodeAt(i); return arr; }
 async function getSubscription(){ if(!('serviceWorker' in navigator)) return null; const reg=await navigator.serviceWorker.ready; return reg.pushManager.getSubscription(); }
 async function checkNotifStatus(){ const sub=await getSubscription(); updateNotifBtn(!!sub); }
 function updateNotifBtn(on){ const btn=document.getElementById('btn-notif'); if(!btn) return; btn.textContent = on ? '🔔 Notifs activées' : '🔕 Activer les notifs'; btn.classList.toggle('on', on); }
 async function toggleNotifications(){ const sub=await getSubscription(); if(sub){ await sub.unsubscribe(); fetch(FTS.PUSH.workerUrl+'/unsubscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({uid})}).catch(()=>{}); updateNotifBtn(false); } else await subscribePush(); }
-async function subscribePush(){ try{ const perm=await Notification.requestPermission(); if(perm!=='granted'){ alert('Autorise les notifications pour continuer.'); return; } const reg=await navigator.serviceWorker.ready; const sub=await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:urlBase64ToUint8Array(FTS.PUSH.vapidPublicKey)}); await fetch(FTS.PUSH.workerUrl+'/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({uid, subscription:sub.toJSON(), group:userData?.group||'', subgroup:userData?.subgroup||''})}); updateNotifBtn(true); }catch(e){ alert('Erreur notifications : '+e.message); } }
-function notifyChannel(channel, body){ let group='', subgroup=''; (userData?.group||'').split(', ').forEach(g=>{ if(norm(g)===channel) group=g; }); (userData?.subgroup||'').split(', ').forEach(s=>{ if(norm(s)===channel) subgroup=s; }); fetch(FTS.PUSH.workerUrl+'/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({group, subgroup, title:'FTS — Forum', body, url:'/forum.html', senderUid:uid})}).catch(()=>{}); }
+async function subscribePush(){
+  try{
+    const perm=await Notification.requestPermission();
+    if(perm!=='granted'){ alert('Autorise les notifications pour continuer.'); return; }
+    const reg=await navigator.serviceWorker.ready;
+    const sub=await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:urlBase64ToUint8Array(FTS.PUSH.vapidPublicKey)});
+    const groups = (userData?.group || userProfile?.disciplines?.join(', ') || '').split(',').map(x=>x.trim()).filter(Boolean);
+    const subgroups = (userData?.subgroup || '').split(',').map(x=>x.trim()).filter(Boolean);
+    await fetch(FTS.PUSH.workerUrl+'/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      uid, subscription:sub.toJSON(),
+      group:groups.join(', '), subgroup:subgroups.join(', '),
+      groups, subgroups
+    })});
+    updateNotifBtn(true);
+  }catch(e){ alert('Erreur notifications : '+e.message); }
+}
+function notifyChannel(channel, body, msgId){
+  const info = channelInfoById(channel);
+  const url = './forum.html?channel=' + encodeURIComponent(channel) + (msgId ? '&msg=' + encodeURIComponent(msgId) : '');
+  fetch(FTS.PUSH.workerUrl+'/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    type:'forum', channel, group:info.group, subgroup:info.subgroup,
+    title:'FTS — Forum', body, url, senderUid:uid, msgId
+  })}).catch(()=>{});
+}
 </script>
 <script src="assets/js/fts-pwa.js"></script>
 </body>
