@@ -118,7 +118,6 @@ function catIcon(s){ return FTS.catIcon(s); }
 
 
 window.addEventListener('DOMContentLoaded', async () => {
-  if('serviceWorker' in navigator){ navigator.serviceWorker.register('./sw.js', {scope:'./'}).catch(()=>{}); }
   db = FTS.initFirebase(); auth = firebase.auth();
   loadCategoryStructure();
   auth.onAuthStateChanged(async user => {
@@ -426,6 +425,6 @@ function notifyChannel(channel, body, msgId){
   })}).catch(()=>{});
 }
 </script>
-<script src="assets/js/fts-pwa.js"></script>
+<script src="assets/js/fts-pwa.js?v=12"></script>
 </body>
 </html>

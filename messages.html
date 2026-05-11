@@ -178,7 +178,6 @@ function setAv(el, name, isGroup){ FTSChat.setAvatar(el, name, { type: isGroup ?
 
 /* ── INIT ────────────────────────────────────────────────────── */
 window.addEventListener("DOMContentLoaded", () => {
-  if("serviceWorker" in navigator){ navigator.serviceWorker.register("./sw.js", {scope:"./"}).catch(()=>{}); }
   const params = new URLSearchParams(location.search || "");
   deepLinkConvId = params.get("conv");
   deepLinkMsgId = params.get("msg");
@@ -575,6 +574,6 @@ function fmtDay(ts){ return FTSChat.fmtDay(ts); }
 function handleKey(e){ FTSChat.handleEnter(e, sendMessage); }
 function autoResize(el){ FTSChat.autoResize(el); }
 </script>
-<script src="assets/js/fts-pwa.js"></script>
+<script src="assets/js/fts-pwa.js?v=12"></script>
 </body>
 </html>

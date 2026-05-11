@@ -1,4 +1,4 @@
-const CACHE = 'fts-v11-resource-notifs-fix';
+const CACHE = 'fts-v12-auto-update';
 const FILES = [
   './manifest.json',
   './assets/img/fts192.png',
@@ -8,6 +8,13 @@ const FILES = [
   './messages.html',
   './profs.html'
 ];
+
+// Force l'activation immédiate d'une nouvelle version envoyée par assets/js/fts-pwa.js
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
 
 self.addEventListener('install', e => {
   e.waitUntil(
@@ -20,20 +27,30 @@ self.addEventListener('install', e => {
 
 self.addEventListener('activate', e => {
   e.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
-    )
+    caches.keys()
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(() => self.clients.claim())
+      .then(() => clients.matchAll({ type: 'window', includeUncontrolled: true }))
+      .then(clientList => {
+        clientList.forEach(client => client.postMessage({ type: 'FTS_SW_ACTIVATED', cache: CACHE }));
+      })
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', e => {
   if(e.request.method !== 'GET') return;
+
+  const url = new URL(e.request.url);
+  if (url.pathname.endsWith('/sw.js')) {
+    e.respondWith(fetch(e.request, { cache: 'no-store' }));
+    return;
+  }
+
   e.respondWith(
     fetch(e.request)
       .then(res => {
         const clone = res.clone();
-        caches.open(CACHE).then(cache => cache.put(e.request, clone));
+        caches.open(CACHE).then(cache => cache.put(e.request, clone)).catch(() => {});
         return res;
       })
       .catch(() => caches.match(e.request))
