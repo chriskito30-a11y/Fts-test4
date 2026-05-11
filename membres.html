@@ -690,6 +690,9 @@ const ICONS = {
         return;
       }
 
+      // Charger les catégories dynamiques depuis Firebase AVANT d'afficher le dashboard
+      await loadDynamicCategories();
+
       // ✅ Accès autorisé — afficher la page
       document.getElementById('auth-loading').style.display  = 'none';
       document.getElementById('page-content').style.display  = 'block';
@@ -726,24 +729,56 @@ const ICONS = {
 })();
 
 
+
+/* ── CATÉGORIES DYNAMIQUES FIREBASE ───────────────────────────── */
+async function loadDynamicCategories() {
+  try {
+    const structure = FTS.getCategoryStructureAsync
+      ? await FTS.getCategoryStructureAsync(db)
+      : (FTS.getCategoryStructure ? FTS.getCategoryStructure() : []);
+
+    if (structure && structure.length) {
+      C.categories = structure.map(c => ({
+        icon: c.icon || FTS.catIcon(c.category),
+        name: c.category,
+        subcats: (c.subs || []).map(s => s.name).filter(Boolean),
+        whatsapp: ''
+      }));
+    }
+  } catch(e) {
+    console.warn('[FTS Membres] Catégories Firebase indisponibles, fallback local.', e);
+  }
+}
+
+function findCategoryIndexByName(name) {
+  const wanted = FTS.norm(name || '');
+  return C.categories.findIndex(c => FTS.norm(c.name) === wanted);
+}
+
 /* ── TABLEAU DE BORD ─────────────────────────────────────────── */
 function renderDashboard(profile, email) {
   const displayName = profile.firstName || profile.name || email || 'membre';
+
+  // Admin : toutes les catégories Firebase. Membre/prof : disciplines attribuées au profil.
   const discs = profile.role === 'admin'
     ? C.categories.map(c => c.name)
-    : (profile.disciplines || []);
+    : (profile.disciplines || profile.group || []);
+
+  const discList = Array.isArray(discs)
+    ? discs
+    : String(discs || '').split(',').map(x => x.trim()).filter(Boolean);
 
   const roleLabel = profile.role === 'admin' ? 'Admin' : profile.role === 'prof' ? 'Prof' : 'Membre';
   const roleIcon  = profile.role === 'admin' ? '🛡' : profile.role === 'prof' ? '🎓' : '👤';
 
   const pills = document.getElementById('profile-pills');
   if (pills) {
-    const discPills = discs.length
-      ? discs.map(d => {
-          const idx = C.categories.findIndex(c => c.name === d);
+    const discPills = discList.length
+      ? discList.map(d => {
+          const idx = findCategoryIndexByName(d);
           const cat = idx >= 0 ? C.categories[idx] : null;
           const label = cat ? cat.name : d;
-          const icon = cat ? cat.icon : '🎭';
+          const icon = cat ? cat.icon : FTS.catIcon(label);
           if (idx < 0) return `<span class="profile-pill">${icon} ${FTS.esc(label)}</span>`;
           return `<button type="button" class="profile-pill" onclick="openCat(${idx})" aria-label="Ouvrir les ressources ${FTS.esc(label)}">${icon} ${FTS.esc(label)}</button>`;
         }).join('')
@@ -752,10 +787,9 @@ function renderDashboard(profile, email) {
     pills.innerHTML = `<span class="profile-pill role">${roleIcon} ${roleLabel}</span>` + discPills;
   }
 
-
   const sub = document.getElementById('welcome-sub');
   if (sub) {
-    sub.textContent = discs.length
+    sub.textContent = discList.length
       ? 'Retrouve tes ressources, tes événements et tes espaces d’échange en un seul endroit.'
       : 'Ton compte est actif, mais aucune discipline n’est encore associée à ton profil.';
   }
@@ -873,32 +907,34 @@ async function loadDocs(name, idx) {
 
   let rows = [];
 
-  // Source 1 : Firebase RTDB (nouveaux docs via profs.html)
   try {
-    const snap = await db.ref('fts_ressources').orderByChild('cat').equalTo(name).once('value');
+    const snap = await db.ref('fts_ressources').once('value');
     if (snap.exists()) {
       snap.forEach(child => {
-        const d = child.val();
+        const d = child.val() || {};
         if (d.active === false || d.status === 'inactive') return;
+        const catName = d.cat || d.category || '';
+        if (FTS.norm(catName) !== FTS.norm(name)) return;
         rows.push({
-          cat:  d.cat || d.category || name,
+          cat:  catName || name,
           sub:  d.subcat || d.subcategory || '',
-          name: d.name,
-          url:  d.url || d.content || '',
+          name: d.name || d.title || 'Sans titre',
+          url:  d.url || d.content || d.text || '',
           type: (d.type || 'doc').toLowerCase().trim(),
           key:  child.key,
-          ts:   d.createdAt || 0,
+          ts:   d.createdAt || d.updatedAt || 0,
         });
       });
     }
-  } catch(e) {}
+  } catch(e) {
+    console.warn('[FTS Membres] Impossible de charger les ressources Firebase', e);
+  }
 
-  // Dédoublonnage par nom + élimination doublons Sheets/Firebase
   const seen = new Set();
   const deduped = rows
-    .sort((a, b) => b.ts - a.ts) // Firebase en premier (plus récent)
+    .sort((a, b) => b.ts - a.ts)
     .filter(r => {
-      const k = r.name.trim().toLowerCase() + r.cat.toLowerCase();
+      const k = (r.name || '').trim().toLowerCase() + FTS.norm(r.cat || '');
       if (seen.has(k)) return false;
       seen.add(k); return true;
     });
@@ -949,7 +985,7 @@ function filtDocs(si, idx, el) {
 
   const cat      = C.categories[idx];
   const docs     = allDocs[idx] || [];
-  const filtered = si === 0 ? docs : docs.filter(x => x.sub === cat.subcats[si - 1]);
+  const filtered = si === 0 ? docs : docs.filter(x => FTS.norm(x.sub) === FTS.norm(cat.subcats[si - 1]));
   showDocs(filtered, idx);
 }
 
