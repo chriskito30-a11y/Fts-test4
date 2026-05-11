@@ -1,4 +1,4 @@
-const CACHE = 'fts-v10-resource-notifs';
+const CACHE = 'fts-v11-resource-notifs-fix';
 const FILES = [
   './manifest.json',
   './assets/img/fts192.png',

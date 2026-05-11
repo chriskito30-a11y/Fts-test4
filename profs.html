@@ -793,7 +793,6 @@ async function getResourceRecipientUids(target) {
 
 async function notifyNewResource(data) {
   try {
-    if (!FTS.PUSH || !FTS.PUSH.workerUrl) return;
     const target = resourceTargetPayload(data);
     const recipientUids = await getResourceRecipientUids(target);
     if (!recipientUids.length) return;
@@ -825,26 +824,46 @@ async function notifyNewResource(data) {
     });
     await db.ref().update(fanout).catch(() => {});
 
-    await fetch(FTS.PUSH.workerUrl + "/notify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        uid: recipientUids.length === 1 ? recipientUids[0] : undefined,
-        uids: recipientUids,
-        recipientUids,
-        group: target.group,
-        subgroup: target.subgroup,
-        category: target.category,
-        subcategory: target.subcategory,
-        type: "resource",
-        resourceId: data.key || "",
-        title: "FTS — Nouveau document",
-        body: (data.name || "Nouveau document") + (catLabel ? " · " + catLabel : ""),
-        url,
-        tag: "resource-" + (data.key || Date.now()),
-        senderUid: currentUserUid
+    if (!FTS.PUSH || !FTS.PUSH.workerUrl) {
+      await db.ref("fts_debug_notifications/resource_" + (data.key || Date.now())).set({
+        ok: false,
+        reason: "FTS.PUSH.workerUrl manquant dans fts-firebase.js",
+        recipientCount: recipientUids.length,
+        recipients: recipientUids,
+        cat: target.category,
+        subcat: target.subcategory,
+        createdAt: Date.now()
+      }).catch(() => {});
+      return;
+    }
+
+    const pushPayloadBase = {
+      group: target.group,
+      subgroup: target.subgroup,
+      category: target.category,
+      subcategory: target.subcategory,
+      type: "resource",
+      resourceId: data.key || "",
+      title: "FTS — Nouveau document",
+      body: (data.name || "Nouveau document") + (catLabel ? " · " + catLabel : ""),
+      url,
+      senderUid: currentUserUid
+    };
+
+    await Promise.allSettled(recipientUids.map(uid =>
+      fetch(FTS.PUSH.workerUrl + "/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...pushPayloadBase,
+          uid,
+          uids: [uid],
+          recipientUids: [uid],
+          recipients: [uid],
+          tag: "resource-" + (data.key || Date.now()) + "-" + uid
+        })
       })
-    });
+    ));
   } catch(e) {
     console.warn("[FTS Profs] Notification document non envoyée", e);
   }

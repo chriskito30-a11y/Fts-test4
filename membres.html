@@ -573,6 +573,10 @@ button.profile-pill:hover {
         <span class="quick-ico">💬</span>
         <span class="quick-title">Forum</span>
       </a>
+      <button type="button" class="quick-card btn-quick" id="btn-notif" onclick="toggleNotifications()">
+        <span class="quick-ico">🔕</span>
+        <span class="quick-title">Activer les notifs</span>
+      </button>
     </div>
 
     <!-- Section événements -->
@@ -656,6 +660,7 @@ let allEvts   = [];
 let allDocs   = {};
 let showAll   = false;
 let userProfile = null;
+let currentUid = null;
 let pendingResourceOpen = null;
 
 /* ── ICÔNES FICHIERS ─────────────────────────────────────────── */
@@ -743,6 +748,7 @@ function canSeeDocInCategory(doc, cat) {
       // Lecture du profil RTDB
       const snap = await db.ref('fts_users/' + user.uid).once('value');
       userProfile = snap.val();
+      currentUid = user.uid;
 
       if (!userProfile || userProfile.status === 'pending') {
         // Compte en attente → retour auth
@@ -775,6 +781,8 @@ function canSeeDocInCategory(doc, cat) {
 
       // Badge non lus messages
       listenUnreadBadge(user.uid);
+      checkNotifStatus();
+      listenResourceNotificationFallback(user.uid);
 
       // Chargement des données
       loadEvts();
@@ -1136,6 +1144,79 @@ async function loadAnnonce() {
   } catch(e) {
     console.warn('[FTS] Annonce Firebase indisponible :', e);
   }
+}
+
+
+/* ── NOTIFICATIONS PUSH RESSOURCES / FORUM / MESSAGES ────────── */
+function urlBase64ToUint8Array(b64){
+  const pad = '='.repeat((4 - b64.length % 4) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  const arr = new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+async function getSubscription(){
+  if(!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
+  const reg = await navigator.serviceWorker.ready;
+  return reg.pushManager.getSubscription();
+}
+function updateNotifBtn(on){
+  const btn = document.getElementById('btn-notif');
+  if(!btn) return;
+  btn.classList.toggle('on', !!on);
+  btn.innerHTML = on
+    ? '<span class="quick-ico">🔔</span><span class="quick-title">Notifs activées</span>'
+    : '<span class="quick-ico">🔕</span><span class="quick-title">Activer les notifs</span>';
+}
+async function checkNotifStatus(){
+  try { updateNotifBtn(!!(await getSubscription())); }
+  catch(e) { updateNotifBtn(false); }
+}
+function memberNotificationGroups(){ return normList(userProfile && (userProfile.group || userProfile.disciplines)); }
+function memberNotificationSubgroups(){ return normList(userProfile && (userProfile.subgroup || userProfile.subgroups || userProfile.subcategories)); }
+async function toggleNotifications(){
+  try{
+    if(!FTS.PUSH || !FTS.PUSH.workerUrl || !FTS.PUSH.vapidPublicKey){
+      alert('Configuration notifications manquante. Vérifie FTS.PUSH dans fts-firebase.js.'); return;
+    }
+    const existing = await getSubscription();
+    if(existing){
+      await existing.unsubscribe();
+      await fetch(FTS.PUSH.workerUrl + '/unsubscribe', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({uid: currentUid})}).catch(()=>{});
+      updateNotifBtn(false); return;
+    }
+    const perm = await Notification.requestPermission();
+    if(perm !== 'granted'){ alert('Autorise les notifications pour continuer.'); return; }
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:urlBase64ToUint8Array(FTS.PUSH.vapidPublicKey)});
+    const groups = memberNotificationGroups();
+    const subgroups = memberNotificationSubgroups();
+    await fetch(FTS.PUSH.workerUrl + '/subscribe', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({uid: currentUid, subscription: sub.toJSON(), group: groups.join(', '), subgroup: subgroups.join(', '), groups, subgroups, source:'membres'})
+    });
+    updateNotifBtn(true);
+  }catch(e){ alert('Erreur notifications : ' + (e && e.message ? e.message : e)); }
+}
+function listenResourceNotificationFallback(uid){
+  if(!uid || !('Notification' in window) || !('serviceWorker' in navigator)) return;
+  let initialized = false;
+  db.ref('fts_user_notifications/' + uid).limitToLast(20).on('child_added', async snap => {
+    const n = snap.val() || {};
+    if(!initialized) return;
+    if(n.type !== 'resource' || n.read === true) return;
+    if(Notification.permission !== 'granted') return;
+    try{
+      const reg = await navigator.serviceWorker.ready;
+      reg.showNotification(n.title || 'Nouveau document', {
+        body: n.body || 'Un nouveau document est disponible.',
+        icon:'./assets/img/fts192.png', badge:'./assets/img/fts192.png',
+        tag:'resource-local-' + (n.resourceId || snap.key),
+        data:{ url:n.url || './membres.html' }
+      });
+    }catch(e){}
+  });
+  setTimeout(() => { initialized = true; }, 1500);
 }
 
 /* ── BADGE NON LUS MESSAGES ──────────────────────────────────── */
