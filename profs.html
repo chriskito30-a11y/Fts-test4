@@ -140,6 +140,24 @@
 .upload-progress-fill { background: var(--red); height: 100%; width: 0%; transition: width .3s; }
 .upload-progress-text { font-size: .72rem; margin-top: .4rem; color: var(--gold); }
 
+
+/* Aide OneDrive danse */
+.dance-video-box {
+  display: none; margin-top: .85rem; padding: .9rem 1rem;
+  background: rgba(201,168,76,.07); border: 1px solid rgba(201,168,76,.22);
+  border-radius: var(--r-sm); font-size: .76rem; color: var(--muted); line-height: 1.55;
+}
+.dance-video-box strong { color: var(--white); font-weight: 500; }
+.dance-video-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .75rem; }
+.dance-video-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: .35rem;
+  background: var(--red); color: var(--white); text-decoration: none;
+  border-radius: var(--r-sm); padding: .55rem .75rem; font-size: .72rem; font-weight: 600;
+}
+.dance-video-btn:hover { background: #b71815; }
+.dance-video-btn.disabled { background: #272727; color: #777; pointer-events: none; }
+.dance-video-note { margin-top: .45rem; font-size: .68rem; color: #777; }
+
 /* Message feedback */
 .msg { display: none; padding: .8rem 1rem; border-radius: var(--r-sm); font-size: .82rem; margin-top: .8rem; }
 .msg.success { background: rgba(50,120,50,.15); border: 1px solid #2a5a2a; color: #6aba6a; }
@@ -292,7 +310,7 @@
 
         <div class="field" id="subcat-row" style="display:none">
           <label>Section (optionnel)</label>
-          <select id="f-subcat">
+          <select id="f-subcat" onchange="updateDanceVideoFolder()">
             <option value="">-- Aucune --</option>
           </select>
         </div>
@@ -342,6 +360,16 @@
   <strong>Google Drive</strong>,
   puis collez simplement le lien.
           </p>
+
+          <div id="dance-video-folder-box" class="dance-video-box">
+            <strong id="dance-video-folder-title">Dossier vidéo Danse</strong>
+            <div id="dance-video-folder-text">Le lien lecture sera renseigné automatiquement dans le champ ci-dessus.</div>
+            <div class="dance-video-actions">
+              <a id="dance-video-upload-link" class="dance-video-btn disabled" href="#" target="_blank" rel="noopener">📁 Déposer la vidéo</a>
+            </div>
+            <div class="dance-video-note" id="dance-video-folder-note">Configure les liens OneDrive dans le bloc DANCE_VIDEO_FOLDERS.</div>
+          </div>
+
           <input type="file" id="f-file" style="display:none"
             accept=".pdf,.mp3,.mp4,.jpg,.jpeg,.png,.gif,.doc,.docx,.ppt,.pptx">
         </div>
@@ -467,6 +495,30 @@ let SUBCATS = {};
 let ALL_CATS = [];
 
 const TYPE_ICONS = { pdf:"▩", mp3:"♪", audio:"♪", video:"▶", image:"▪", texte:"✉", doc:"□" };
+
+/*
+  Liens OneDrive pour les vidéos de danse.
+  À compléter plus tard :
+  - read  = lien lecture seule visible par les élèves, automatiquement mis dans le champ Lien
+  - write = lien dépôt/modification visible uniquement par le prof dans le formulaire
+
+  Important : les clés doivent correspondre aux noms des sous-catégories Danse.
+  Tu peux en ajouter / renommer selon tes sections exactes dans Firebase.
+*/
+const DANCE_VIDEO_FOLDERS = {
+  "Baby Show": {
+    read: "",
+    write: ""
+  },
+  "Junior": {
+    read: "",
+    write: ""
+  },
+  "Ados/Adultes": {
+    read: "",
+    write: ""
+  }
+};
 
 let db, auth;
 let userProfile, currentUserUid;
@@ -625,6 +677,7 @@ function switchTab(name) {
 function updateSubcats() {
   const cat = document.getElementById("f-cat").value;
   _fillSubcat("f-subcat", "subcat-row", cat);
+  updateDanceVideoFolder();
 }
 function updateEditSubcats() {
   const cat = document.getElementById("e-cat").value;
@@ -646,6 +699,62 @@ function _fillSubcat(selId, rowId, cat) {
   }
 }
 
+/* ── DOSSIERS VIDÉO DANSE ─────────────────────────────────────── */
+function isDanceCat(cat) {
+  return normAccess(cat) === normAccess("Danse");
+}
+
+function getDanceFolderConfig(subcat) {
+  const wanted = normAccess(subcat || "");
+  const key = Object.keys(DANCE_VIDEO_FOLDERS).find(k => normAccess(k) === wanted);
+  return key ? { key, ...DANCE_VIDEO_FOLDERS[key] } : null;
+}
+
+function updateDanceVideoFolder() {
+  const cat = document.getElementById("f-cat").value;
+  const subcat = document.getElementById("f-subcat").value;
+  const type = document.getElementById("f-type").value;
+  const box = document.getElementById("dance-video-folder-box");
+  const title = document.getElementById("dance-video-folder-title");
+  const text = document.getElementById("dance-video-folder-text");
+  const note = document.getElementById("dance-video-folder-note");
+  const uploadLink = document.getElementById("dance-video-upload-link");
+  const urlInput = document.getElementById("f-url");
+
+  if (!box || !uploadLink || !urlInput) return;
+
+  const shouldShow = isDanceCat(cat) && type === "video" && !!subcat;
+  if (!shouldShow) {
+    box.style.display = "none";
+    uploadLink.href = "#";
+    uploadLink.classList.add("disabled");
+    return;
+  }
+
+  const cfg = getDanceFolderConfig(subcat);
+  box.style.display = "block";
+  title.textContent = "Dossier vidéo Danse — " + subcat;
+
+  if (cfg && cfg.read) {
+    urlInput.value = cfg.read;
+    text.textContent = "Le lien lecture élèves a été renseigné automatiquement dans le champ Lien.";
+  } else {
+    text.textContent = "Lien lecture élèves non configuré pour cette sous-catégorie.";
+  }
+
+  if (cfg && cfg.write) {
+    uploadLink.href = cfg.write;
+    uploadLink.classList.remove("disabled");
+    uploadLink.textContent = "📁 Déposer la vidéo dans OneDrive";
+    note.textContent = "Après dépôt dans OneDrive, reviens ici, ajoute un titre et publie.";
+  } else {
+    uploadLink.href = "#";
+    uploadLink.classList.add("disabled");
+    uploadLink.textContent = "📁 Lien dépôt OneDrive à configurer";
+    note.textContent = "Ajoute plus tard le lien write dans DANCE_VIDEO_FOLDERS pour activer ce bouton.";
+  }
+}
+
 /* ── TYPE ─────────────────────────────────────────────────────── */
 function updateType() {
   const t = document.getElementById("f-type").value;
@@ -653,11 +762,12 @@ function updateType() {
   document.getElementById("upload-row").style.display = t === "texte" ? "none" : "block";
   const labels = {
     pdf:"Lien Google Drive (PDF)", mp3:"Lien audio",
-    video:"Lien YouTube ou Drive", image:"Lien image", doc:"Lien",
+    video:"Lien OneDrive, YouTube ou Google Drive", image:"Lien image", doc:"Lien",
   };
   document.getElementById("video-upload-tip").style.display =
   t === "video" ? "block" : "none";
   document.getElementById("url-label").textContent = labels[t] || "Lien";
+  updateDanceVideoFolder();
 }
 
 /* ── UPLOAD CLOUDINARY ────────────────────────────────────────── */
@@ -680,7 +790,10 @@ function uploadFile(file) {
     document.getElementById("progress-bar").style.background = "#22c55e";
     const ext = file.name.split(".").pop().toLowerCase();
     const typeMap = { pdf:"pdf", mp3:"mp3", mp4:"video", jpg:"image", jpeg:"image", png:"image", gif:"image" };
-    if (typeMap[ext]) document.getElementById("f-type").value = typeMap[ext];
+    if (typeMap[ext]) {
+      document.getElementById("f-type").value = typeMap[ext];
+      updateType();
+    }
   })
   .catch(() => {
     document.getElementById("progress-text").textContent = "Erreur lors de l'upload";
@@ -754,6 +867,8 @@ function resetForm() {
   document.getElementById("upload-progress").style.display = "none";
   document.getElementById("progress-bar").style.width   = "0%";
   document.getElementById("subcat-row").style.display   = "none";
+  const box = document.getElementById("dance-video-folder-box");
+  if (box) box.style.display = "none";
 }
 
 
