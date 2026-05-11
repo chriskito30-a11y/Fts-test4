@@ -504,11 +504,11 @@ const TYPE_ICONS = { pdf:"▩", mp3:"♪", audio:"♪", video:"▶", image:"▪"
   Important : les clés correspondent aux noms des sous-catégories Danse dans Firebase.
 */
 const DANCE_VIDEO_FOLDERS = {
-  "Les Baby Show": {
+  "Baby Show": {
     read: "https://1drv.ms/f/c/523a8512bc652dc1/IgBuRNwPMrgqSY12s26Nv8iKAY2vgBnAo9TG4mY172-g-y8",
     write: "https://1drv.ms/f/c/523a8512bc652dc1/IgBuRNwPMrgqSY12s26Nv8iKAWSrfYxCOeni6vVgyB6Uakw"
   },
-  "Show Danse Junior": {
+  "Junior": {
     read: "https://1drv.ms/f/c/523a8512bc652dc1/IgABEDHu9sKOR4yxli-R6VoIAZIHxhkdbl7m-NdhGfisbD4",
     write: "https://1drv.ms/f/c/523a8512bc652dc1/IgABEDHu9sKOR4yxli-R6VoIAc0jNvvHrY9EqRn6NIc5cZ4"
   },
@@ -916,8 +916,17 @@ async function getResourceRecipientUids(target) {
   const uids = [];
   if (snap.exists()) {
     snap.forEach(child => {
-      if (child.key === currentUserUid) return;
+      if (child.key === currentUserUid) return; // évite la notification à soi-même
       if (userCanReceiveResourceNotification(child.val(), target)) uids.push(child.key);
+    });
+  }
+  // Sécurité : les admins actifs reçoivent toujours les notifications documents,
+  // même s'ils ne sont pas dans la catégorie / sous-catégorie.
+  const adminSnap = await db.ref("fts_users").orderByChild("role").equalTo("admin").once("value");
+  if (adminSnap.exists()) {
+    adminSnap.forEach(child => {
+      const u = child.val() || {};
+      if (child.key !== currentUserUid && u.status === "active" && !uids.includes(child.key)) uids.push(child.key);
     });
   }
   return uids;

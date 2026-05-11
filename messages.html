@@ -373,7 +373,8 @@ async function sendMessage(){
     }
   }
   await db.ref().update(upd);
-  notifyDirectMessage(currentConvId, convData, recipients, text, msgRef.key);
+  const adminRecipients = await getAdminRecipientUids(myUid);
+  notifyDirectMessage(currentConvId, convData, uniqueUids(recipients.concat(adminRecipients)), text, msgRef.key);
 }
 
 /* ── BULLE ───────────────────────────────────────────────────── */
@@ -565,6 +566,18 @@ async function subscribePush(){
     updateNotifBtn(true);
   }catch(e){ alert('Erreur notifications : '+e.message); }
 }
+function uniqueUids(list){ return Array.from(new Set((list || []).filter(Boolean))); }
+async function getAdminRecipientUids(excludeUid){
+  try{
+    const snap = await db.ref('fts_users').orderByChild('role').equalTo('admin').once('value');
+    const ids = [];
+    if(snap.exists()) snap.forEach(child => {
+      const u = child.val() || {};
+      if(child.key !== excludeUid && u.status === 'active') ids.push(child.key);
+    });
+    return ids;
+  }catch(e){ console.warn('[FTS Messages] Admin recipients', e); return []; }
+}
 function notifyDirectMessage(convId, convData, recipients, text, msgId){
   if(!recipients || !recipients.length || !FTS.PUSH) return;
   const isGroup = convData && convData.type === 'group';
@@ -574,7 +587,10 @@ function notifyDirectMessage(convId, convData, recipients, text, msgId){
   recipients.forEach(uid => {
     fetch(FTS.PUSH.workerUrl+'/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
       type:isGroup ? 'dm_group' : 'dm_direct', uid,
-      conversationId:convId, msgId, title, body, url, senderUid:myUid
+      conversationId:convId, msgId, title, body, url, senderUid:myUid,
+      adminCopy: convData && convData.participants && !convData.participants[uid],
+      forceUid: true,
+      tag: 'dm-' + convId + '-' + (msgId || Date.now()) + '-' + uid
     })}).catch(()=>{});
   });
 }
