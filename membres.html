@@ -487,6 +487,91 @@ button.profile-pill:hover {
   .welcome-title { font-size: 1.65rem; }
 }
 
+
+
+/* ── GESTION DU COMPTE ───────────────────────────────────────── */
+.account-actions {
+  display: flex;
+  gap: .5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.btn-account {
+  background: rgba(201,168,76,.08);
+  border: 1px solid rgba(201,168,76,.28);
+  color: var(--gold);
+  padding: .38rem .75rem;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  font-size: .72rem;
+  font-family: var(--font-body);
+  transition: all .2s;
+}
+.btn-account:hover { border-color: var(--gold); background: rgba(201,168,76,.13); color: var(--white); }
+.welcome-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  position: relative;
+  z-index: 1;
+}
+.account-modal-box { max-width: 520px; }
+.account-section {
+  background: #141414;
+  border: 1px solid #1f1f1f;
+  border-radius: var(--r-md);
+  padding: 1rem;
+  margin-bottom: .8rem;
+}
+.account-section h3 {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  margin: 0 0 .35rem;
+}
+.account-section p {
+  color: var(--muted);
+  font-size: .78rem;
+  line-height: 1.55;
+  margin: 0 0 .8rem;
+}
+.account-field {
+  width: 100%;
+  background: #0f0f0f;
+  border: 1px solid #252525;
+  color: var(--white);
+  border-radius: var(--r-sm);
+  padding: .75rem .85rem;
+  font-family: var(--font-body);
+  font-size: 16px;
+  margin-bottom: .55rem;
+  box-sizing: border-box;
+}
+.account-field:focus { outline: none; border-color: rgba(201,168,76,.55); }
+.account-row { display: flex; gap: .55rem; flex-wrap: wrap; }
+.account-btn {
+  border: 1px solid #333;
+  background: #1b1b1b;
+  color: var(--white);
+  border-radius: var(--r-sm);
+  padding: .65rem .9rem;
+  font-family: var(--font-body);
+  font-size: .78rem;
+  cursor: pointer;
+  transition: all .2s;
+}
+.account-btn:hover { border-color: var(--gold); color: var(--gold); }
+.account-btn.danger { border-color: rgba(212,32,26,.35); color: var(--red); background: rgba(212,32,26,.06); }
+.account-btn.danger:hover { background: rgba(212,32,26,.12); border-color: var(--red); }
+.account-btn:disabled { opacity: .55; cursor: wait; }
+.account-msg { min-height: 1rem; font-size: .76rem; color: var(--muted); margin-top: .45rem; line-height: 1.45; }
+.account-msg.ok { color: var(--gold); }
+.account-msg.err { color: var(--red); }
+@media(max-width:560px){
+  .welcome-head { flex-direction: column; }
+  .account-actions, .account-actions .btn-account { width: 100%; }
+}
+
 </style>
 </head>
 
@@ -540,8 +625,15 @@ button.profile-pill:hover {
     <!-- Tableau de bord -->
     <section class="member-dashboard" aria-label="Tableau de bord membre">
       <div class="welcome-card">
-        <div class="welcome-kicker">Bienvenue</div>
-        <div class="welcome-title">Bonjour, <span id="user-display-name">…</span></div>
+        <div class="welcome-head">
+          <div>
+            <div class="welcome-kicker">Bienvenue</div>
+            <div class="welcome-title">Bonjour, <span id="user-display-name">…</span></div>
+          </div>
+          <div class="account-actions">
+            <button type="button" class="btn-account" onclick="openAccountModal()">⚙️ Gestion du compte</button>
+          </div>
+        </div>
         <div class="welcome-sub" id="welcome-sub">Retrouve ici tes ressources, tes événements et tes espaces d’échange.</div>
         <div class="profile-pills" id="profile-pills"></div>
       </div>
@@ -602,6 +694,42 @@ button.profile-pill:hover {
   </div>
 </div><!-- /page-content -->
 
+
+
+
+<!-- ── MODAL GESTION DU COMPTE ───────────────────────────────── -->
+<div class="modal-overlay hidden" id="account-modal">
+  <div class="modal-box account-modal-box">
+    <div class="modal-header">
+      <span class="modal-title">⚙️ Gestion du compte</span>
+      <button class="modal-close" onclick="closeAccountModal()">✕</button>
+    </div>
+
+    <div class="account-section">
+      <h3>Modifier le mot de passe</h3>
+      <p>Entre un nouveau mot de passe. Par sécurité Firebase, il peut être demandé de te reconnecter si ta session est trop ancienne.</p>
+      <input class="account-field" id="account-new-pwd" type="password" autocomplete="new-password" placeholder="Nouveau mot de passe — 8 caractères minimum">
+      <input class="account-field" id="account-new-pwd2" type="password" autocomplete="new-password" placeholder="Confirmer le mot de passe">
+      <button class="account-btn" id="btn-account-pwd" onclick="changeAccountPassword()">Changer le mot de passe</button>
+      <div class="account-msg" id="account-pwd-msg"></div>
+    </div>
+
+    <div class="account-section">
+      <h3>Session</h3>
+      <p>Déconnecte-toi de cet appareil et retourne à la page de connexion.</p>
+      <button class="account-btn" onclick="doSignOut()">Se déconnecter</button>
+    </div>
+
+    <div class="account-section">
+      <h3>Supprimer mon compte</h3>
+      <p>Action définitive : le profil membre, le profil forum, les accès messagerie et le compte Firebase Authentication seront supprimés. Si la suppression complète demande une reconnexion, reconnecte-toi puis recommence.</p>
+      <div class="account-row">
+        <button class="account-btn danger" id="btn-account-delete" onclick="deleteMyAccount()">Supprimer définitivement mon compte</button>
+      </div>
+      <div class="account-msg" id="account-delete-msg"></div>
+    </div>
+  </div>
+</div>
 
 <!-- ── MODAL CATÉGORIE ────────────────────────────────────────── -->
 <div class="modal-overlay hidden" id="mo">
@@ -1247,6 +1375,142 @@ function updateMsgBadge(count) {
   }
 }
 
+
+/* ── GESTION DU COMPTE ───────────────────────────────────────── */
+function openAccountModal() {
+  const m = document.getElementById('account-modal');
+  if (!m) return;
+  clearAccountMsg('account-pwd-msg');
+  clearAccountMsg('account-delete-msg');
+  const p1 = document.getElementById('account-new-pwd');
+  const p2 = document.getElementById('account-new-pwd2');
+  if (p1) p1.value = '';
+  if (p2) p2.value = '';
+  m.classList.remove('hidden');
+}
+
+function closeAccountModal() {
+  const m = document.getElementById('account-modal');
+  if (m) m.classList.add('hidden');
+}
+
+function setAccountMsg(id, text, type) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text || '';
+  el.classList.remove('ok', 'err');
+  if (type) el.classList.add(type);
+}
+function clearAccountMsg(id) { setAccountMsg(id, '', ''); }
+
+function accountFriendlyError(code) {
+  switch(code) {
+    case 'auth/requires-recent-login': return 'Par sécurité, reconnecte-toi puis recommence cette action.';
+    case 'auth/weak-password': return 'Le mot de passe est trop faible.';
+    case 'auth/network-request-failed': return 'Problème réseau. Réessaie dans quelques instants.';
+    case 'PERMISSION_DENIED': return 'Suppression partielle bloquée par les règles Firebase. Connecte-toi en admin ou ajuste les règles.';
+    default: return 'Une erreur est survenue. Réessaie ou reconnecte-toi.';
+  }
+}
+
+async function changeAccountPassword() {
+  const user = firebase.auth().currentUser;
+  const btn  = document.getElementById('btn-account-pwd');
+  const p1   = document.getElementById('account-new-pwd').value;
+  const p2   = document.getElementById('account-new-pwd2').value;
+
+  if (!user) { window.location.href = 'auth.html'; return; }
+  if (!p1 || p1.length < 8) { setAccountMsg('account-pwd-msg', 'Le mot de passe doit contenir au moins 8 caractères.', 'err'); return; }
+  if (p1 !== p2) { setAccountMsg('account-pwd-msg', 'Les deux mots de passe ne correspondent pas.', 'err'); return; }
+
+  try {
+    if (btn) btn.disabled = true;
+    setAccountMsg('account-pwd-msg', 'Modification en cours…', '');
+    await user.updatePassword(p1);
+    document.getElementById('account-new-pwd').value = '';
+    document.getElementById('account-new-pwd2').value = '';
+    setAccountMsg('account-pwd-msg', 'Mot de passe modifié avec succès.', 'ok');
+  } catch(e) {
+    setAccountMsg('account-pwd-msg', accountFriendlyError(e.code), 'err');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function removeUserDatabaseTraces(uid) {
+  const updates = {};
+  updates['fts_users/' + uid] = null;
+  updates['fts_forum/users/' + uid] = null;
+  updates['fts_dm/userConvs/' + uid] = null;
+
+  try {
+    const convSnap = await db.ref('fts_dm/userConvs/' + uid).once('value');
+    const convIds = convSnap.val() ? Object.keys(convSnap.val()) : [];
+    convIds.forEach(id => {
+      updates['fts_dm/conversations/' + id + '/participants/' + uid] = null;
+      updates['fts_dm/conversations/' + id + '/unread/' + uid] = null;
+    });
+  } catch(e) {
+    console.warn('[FTS] Nettoyage conversations partiel :', e);
+  }
+
+  await db.ref().update(updates);
+}
+
+async function anonymizeUserMessages(uid) {
+  try {
+    const forumSnap = await db.ref('fts_forum/messages').once('value');
+    const updates = {};
+    forumSnap.forEach(chSnap => {
+      chSnap.forEach(msgSnap => {
+        const m = msgSnap.val() || {};
+        if (m.uid === uid) {
+          updates['fts_forum/messages/' + chSnap.key + '/' + msgSnap.key + '/name'] = 'Compte supprimé';
+          updates['fts_forum/messages/' + chSnap.key + '/' + msgSnap.key + '/uid'] = null;
+        }
+      });
+    });
+    if (Object.keys(updates).length) await db.ref().update(updates);
+  } catch(e) {
+    console.warn('[FTS] Anonymisation forum partielle :', e);
+  }
+}
+
+async function deleteMyAccount() {
+  const user = firebase.auth().currentUser;
+  const btn  = document.getElementById('btn-account-delete');
+  if (!user) { window.location.href = 'auth.html'; return; }
+
+  const first = confirm('Supprimer définitivement ton compte Fais Ton Show ? Cette action est irréversible.');
+  if (!first) return;
+  const typed = prompt('Pour confirmer, écris SUPPRIMER en majuscules :');
+  if (typed !== 'SUPPRIMER') {
+    setAccountMsg('account-delete-msg', 'Suppression annulée.', '');
+    return;
+  }
+
+  try {
+    if (btn) btn.disabled = true;
+    setAccountMsg('account-delete-msg', 'Suppression des données en cours…', '');
+    const uid = user.uid;
+    await anonymizeUserMessages(uid);
+    await removeUserDatabaseTraces(uid);
+    await user.delete();
+    window.location.href = 'auth.html';
+  } catch(e) {
+    console.warn('[FTS] Suppression compte :', e);
+    setAccountMsg('account-delete-msg', accountFriendlyError(e.code || e.message), 'err');
+    if (btn) btn.disabled = false;
+  }
+}
+
+const accountModal = document.getElementById('account-modal');
+if (accountModal) {
+  accountModal.addEventListener('click', function(e) {
+    if (e.target.id === 'account-modal') closeAccountModal();
+  });
+}
+
 /* ── DÉCONNEXION ─────────────────────────────────────────────── */
 function doSignOut() {
   firebase.auth().signOut().then(() => {
@@ -1261,6 +1525,6 @@ function doSignOut() {
   <button class="btn-close-bar" id="btn-close-bar">✕</button>
 </div>
 
-<script src="assets/js/fts-pwa.js?v=12"></script>
+<script src="assets/js/fts-pwa.js?v=13"></script>
 </body>
 </html>
