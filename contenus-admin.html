@@ -258,8 +258,10 @@ function listenQuestionnaire(){
       return q.title || q.titre;
     }).sort((a,b)=>(a.order||999)-(b.order||999)||(a.title||'').localeCompare(b.title||'', 'fr'));
     renderQList();
-    if(!$('q-key').value && questionnaire.length) editQuestionnaire(questionnaire[0].key, questionnaire[0]._legacyPath);
-    if(!$('q-key').value && !questionnaire.length) newQuestionnaire();
+    const selected=$('q-key').value;
+    if(selected && questionnaire.some(q=>q.key===selected)) editQuestionnaire(selected, $('q-key').dataset.legacy||'');
+    else if(questionnaire.length) editQuestionnaire(questionnaire[0].key, questionnaire[0]._legacyPath);
+    else newQuestionnaire();
   }, err=>{
     console.warn('[FTS Contenus] questionnaire', err);
     msg('msg-q','Lecture questionnaire impossible : '+err.message,false);
@@ -339,10 +341,8 @@ async function saveQuestionnaire(){
   };
   const ref=(existingKey && !legacyPath) ? db.ref('fts_content/questionnaire/options/'+existingKey) : db.ref('fts_content/questionnaire/options').push();
   if(!existingKey || legacyPath) data.createdAt=Date.now();
-  const updates={};
-  updates[ref.path.toString()]=data;
-  if(legacyPath) updates[legacyPath]=null;
-  await db.ref().update(updates);
+  await ref.set(data);
+  if(legacyPath) await db.ref(legacyPath).remove();
   $('q-key').value=ref.key;
   $('q-key').dataset.legacy='';
   msg('msg-q','Option enregistrée');
@@ -494,12 +494,14 @@ function listenResources(){
   if(resourceListenerStarted) return;
   resourceListenerStarted=true;
   db.ref('fts_ressources').on('value', snap=>{
-    resources=[];
-    if(snap.exists()) snap.forEach(c=>resources.push(normalizeResource(c.val(),c.key)));
+    const raw=snap.val()||{};
+    resources=Object.keys(raw).map(key=>normalizeResource(raw[key]||{},key));
     resources.sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0));
     renderRList();
-    if(!$('r-key').value && resources.length) editResource(resources[0].key);
-    if(!$('r-key').value && !resources.length) newResource();
+    const selected=$('r-key').value;
+    if(selected && resources.some(r=>r.key===selected)) editResource(selected);
+    else if(resources.length) editResource(resources[0].key);
+    else newResource();
   }, err=>{
     console.warn('[FTS Contenus] ressources',err);
     msg('msg-r','Lecture ressources impossible : '+err.message,false);
