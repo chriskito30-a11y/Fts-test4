@@ -3,11 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  
-<meta name="application-name" content="Fais Ton Show">
-<meta name="apple-mobile-web-app-title" content="Fais Ton Show">
-<meta name="theme-color" content="#000000">
-  
 <title>Messages — Fais Ton Show</title>
 <link rel="manifest" href="./manifest.json">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -183,6 +178,7 @@ function setAv(el, name, isGroup){ FTSChat.setAvatar(el, name, { type: isGroup ?
 
 /* ── INIT ────────────────────────────────────────────────────── */
 window.addEventListener("DOMContentLoaded", () => {
+  if("serviceWorker" in navigator){ navigator.serviceWorker.register("./sw.js", {scope:"./"}).catch(()=>{}); }
   const params = new URLSearchParams(location.search || "");
   deepLinkConvId = params.get("conv");
   deepLinkMsgId = params.get("msg");
@@ -294,6 +290,14 @@ async function selectConv(id){
   );
   const s    = await db.ref("fts_dm/conversations/"+id).once("value");
   const data = s.val(); if(!data) return;
+
+  // Si l'utilisateur avait supprimé cette conversation de sa liste,
+  // une ouverture via notification doit la réinscrire automatiquement.
+  // Sinon il peut lire/répondre mais le fil n'apparaît plus ensuite.
+  if(data.participants && data.participants[myUid] === true){
+    await db.ref("fts_dm/userConvs/"+myUid+"/"+id).set(true).catch(()=>{});
+  }
+
   const isG  = data.type === "group";
   const name = isG ? (data.name||"Groupe") : otherName(data.participants);
   const pc   = Object.keys(data.participants||{}).length;
@@ -316,8 +320,14 @@ async function selectConv(id){
   ref.on("child_removed", snap => removeMsg(snap.key));
   currentListener = () => ref.off();
 
-  /* Marquer lu */
-  db.ref("fts_dm/conversations/"+id+"/unread/"+myUid).set(0);
+  /* Marquer lu + nettoyer immédiatement la bulle rouge sans attendre un refresh */
+  await db.ref("fts_dm/conversations/"+id+"/unread/"+myUid).set(0);
+  const localConv = allConvs.find(c => c.id === id);
+  if(localConv && localConv.data){
+    localConv.data.unread = localConv.data.unread || {};
+    localConv.data.unread[myUid] = 0;
+    renderConvs(allConvs);
+  }
   setTimeout(() => document.getElementById("msg-input").focus(), 200);
 }
 
@@ -349,10 +359,17 @@ async function sendMessage(){
   };
   const recipients = [];
   for(const uid of Object.keys(ps)){
+    // Important : si un participant avait supprimé la conversation de sa liste,
+    // tout nouveau message doit recréer son index userConvs.
+    // Sans ça, la notification ouvre bien le fil, mais il redisparaît ensuite.
+    upd["fts_dm/userConvs/"+uid+"/"+currentConvId] = true;
+
     if(uid !== myUid){
       recipients.push(uid);
       const c = (await db.ref("fts_dm/conversations/"+currentConvId+"/unread/"+uid).once("value")).val()||0;
       upd["fts_dm/conversations/"+currentConvId+"/unread/"+uid] = c+1;
+    } else {
+      upd["fts_dm/conversations/"+currentConvId+"/unread/"+uid] = 0;
     }
   }
   await db.ref().update(upd);
@@ -554,10 +571,12 @@ function notifyDirectMessage(convId, convData, recipients, text, msgId){
   const title = isGroup ? ('FTS — ' + (convData.name || 'Groupe privé')) : 'FTS — Message privé';
   const body = (me.name || me.email || 'Membre') + ' : ' + text.substring(0, 90);
   const url = './messages.html?conv=' + encodeURIComponent(convId) + (msgId ? '&msg=' + encodeURIComponent(msgId) : '');
-  fetch(FTS.PUSH.workerUrl+'/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-    type:isGroup ? 'dm_group' : 'dm_direct', uid:recipients[0], uids:recipients, recipients,
-    conversationId:convId, msgId, title, body, url, senderUid:myUid
-  })}).catch(()=>{});
+  recipients.forEach(uid => {
+    fetch(FTS.PUSH.workerUrl+'/notify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      type:isGroup ? 'dm_group' : 'dm_direct', uid,
+      conversationId:convId, msgId, title, body, url, senderUid:myUid
+    })}).catch(()=>{});
+  });
 }
 function openMessageDeepLink(){
   if(deepLinkHandled || !deepLinkConvId) return;
@@ -579,6 +598,6 @@ function fmtDay(ts){ return FTSChat.fmtDay(ts); }
 function handleKey(e){ FTSChat.handleEnter(e, sendMessage); }
 function autoResize(el){ FTSChat.autoResize(el); }
 </script>
-<script src="assets/js/fts-pwa.js?v=12"></script>
+<script src="assets/js/fts-pwa.js"></script>
 </body>
 </html>
