@@ -1,9 +1,9 @@
-const CACHE = 'fts-v5';
+const CACHE = 'fts-v6';
 const FILES = [
   './manifest.json',
   './assets/img/fts192.png',
   './assets/img/fts512.png',
-  './forum.html'
+  './membres.html'
 ];
 
 self.addEventListener('install', e => {
