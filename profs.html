@@ -534,6 +534,41 @@ function allowedCats() {
   return ALL_CATS.filter(c => discs.includes(c.value));
 }
 
+function categoryOptionsFromStructureLocal(structure) {
+  const rows = Array.isArray(structure) && structure.length
+    ? structure
+    : (FTS.getDefaultCategoryStructure ? FTS.getDefaultCategoryStructure() : []);
+
+  return rows
+    .filter(c => c && c.active !== false)
+    .sort((a, b) => (+a.order || 999) - (+b.order || 999))
+    .map(c => {
+      const value = c.name || c.category || c.value || "";
+      const icon  = c.icon || c.emoji || (FTS.catIcon ? FTS.catIcon(value) : "");
+      const rawSubs = c.subs || c.subcats || c.subcategories || [];
+      let subcats = [];
+
+      if (Array.isArray(rawSubs)) {
+        subcats = rawSubs
+          .filter(s => typeof s === "string" || (s && s.active !== false))
+          .map(s => typeof s === "string" ? s : (s.name || s.label || ""))
+          .filter(Boolean);
+      } else {
+        subcats = Object.values(rawSubs)
+          .filter(s => typeof s === "string" || (s && s.active !== false))
+          .map(s => typeof s === "string" ? s : (s.name || s.label || ""))
+          .filter(Boolean);
+      }
+
+      return {
+        value,
+        label: (icon ? icon + " " : "") + value,
+        subcats
+      };
+    })
+    .filter(c => c.value);
+}
+
 async function buildCatSelectors() {
   categoryStructure = FTS.getCategoryStructureAsync
     ? await FTS.getCategoryStructureAsync(db)
@@ -541,7 +576,11 @@ async function buildCatSelectors() {
 
   ALL_CATS = FTS.categoryOptionsFromStructure
     ? FTS.categoryOptionsFromStructure(categoryStructure)
-    : [];
+    : categoryOptionsFromStructureLocal(categoryStructure);
+
+  if (!ALL_CATS.length && FTS.getDefaultCategoryStructure) {
+    ALL_CATS = categoryOptionsFromStructureLocal(FTS.getDefaultCategoryStructure());
+  }
 
   SUBCATS = {};
   ALL_CATS.forEach(c => { SUBCATS[c.value] = c.subcats || []; });
@@ -578,7 +617,7 @@ function _fillSubcat(selId, rowId, cat) {
   const sel = document.getElementById(selId);
   const row = document.getElementById(rowId);
   sel.innerHTML = '<option value="">-- Aucune --</option>';
-  if (SUBCATS[cat]) {
+  if (SUBCATS[cat] && SUBCATS[cat].length) {
     SUBCATS[cat].forEach(s => {
       const o = document.createElement("option");
       o.value = s; o.textContent = s;
