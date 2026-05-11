@@ -271,11 +271,9 @@ html, body { height: 100%; }
 
 </div>
 
-<!-- Firebase SDK -->
+<!-- Firebase + utilitaires partagés -->
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
-
-<!-- Utilitaires partagés -->
 <script src="assets/js/fts-utils.js"></script>
 <script src="assets/js/fts-firebase.js"></script>
 
@@ -318,14 +316,20 @@ const CFG = {
 const state = { step1: null, step2: null, step3: null };
 let step3Options = {};
 
-/* ── CHARGEMENT QUESTIONNAIRE FIREBASE ─────────────────────── */
+/* ── CHARGEMENT QUESTIONNAIRE FIREBASE ────────────────────────── */
 async function loadQuestionnaire() {
   try {
     const db = FTS.initFirebase();
     const snap = await db.ref('fts_content/questionnaire/options').orderByChild('order').once('value');
     const rows = [];
-    if (snap.exists()) snap.forEach(child => rows.push({ id: child.key, ...child.val() }));
-    step3Options = buildStep3Options(rows.filter(r => r.active !== false));
+    if (snap.exists()) {
+      snap.forEach(child => {
+        const v = child.val() || {};
+        if (v.active === false || v.status === 'inactive') return;
+        rows.push({ id: child.key, ...v });
+      });
+    }
+    step3Options = buildStep3Options(rows);
   } catch (e) {
     console.warn('[FTS] Impossible de charger le questionnaire Firebase :', e);
     step3Options = {};
@@ -335,42 +339,40 @@ async function loadQuestionnaire() {
 
 function buildStep3Options(rows) {
   const result = {};
-  rows.forEach((row, index) => {
-    const type = String(row.type || '').toLowerCase().trim();
-    const title = row.title || row.titre || '';
-    if (!type || !title) return;
+  rows
+    .sort((a, b) => Number(a.order || 999) - Number(b.order || 999))
+    .forEach((row, index) => {
+      const type = String(row.type || '').toLowerCase().trim();
+      const title = row.title || row.titre || '';
+      if (!type || !title) return;
 
-    if (!result[type]) {
-      const q3 = CFG.step3Questions[type] || { q: 'Choisis une option', d: '' };
-      result[type] = { question: q3.q, desc: q3.d, options: [] };
-    }
+      if (!result[type]) {
+        const q3 = CFG.step3Questions[type] || { q: 'Choisis une option', d: '' };
+        result[type] = { question: q3.q, desc: q3.d, options: [] };
+      }
 
-    const detail = [];
-    if (Array.isArray(row.details)) {
-      row.details.forEach(d => { if (d && d.key && d.value) detail.push([d.key, d.value]); });
-    } else {
-      const d1k = row.detail1_cle || row.detail1Key;
-      const d1v = row.detail1_valeur || row.detail1Value;
-      const d2k = row.detail2_cle || row.detail2Key;
-      const d2v = row.detail2_valeur || row.detail2Value;
-      if (d1k && d1v) detail.push([d1k, d1v]);
-      if (d2k && d2v) detail.push([d2k, d2v]);
-    }
+      let detail = [];
+      if (Array.isArray(row.details)) {
+        detail = row.details
+          .map(d => [d.key || d.cle || '', d.value || d.valeur || ''])
+          .filter(d => d[0] && d[1]);
+      }
+      if (!detail.length) {
+        if ((row.detail1_cle || row.detail1Key) && (row.detail1_valeur || row.detail1Value)) detail.push([row.detail1_cle || row.detail1Key, row.detail1_valeur || row.detail1Value]);
+        if ((row.detail2_cle || row.detail2Key) && (row.detail2_valeur || row.detail2Value)) detail.push([row.detail2_cle || row.detail2Key, row.detail2_valeur || row.detail2Value]);
+      }
 
-    result[type].options.push({
-      id:        row.id || (type + '_' + index),
-      icon:      row.icon || '🎭',
-      title:     title,
-      desc:      row.description || row.desc || '',
-      detail,
-      link:      row.link || row.lien || '#',
-      destTitle: row.destTitle || row.dest_titre || title,
-      destDesc:  row.destDesc || row.dest_desc || row.description || '',
-      order:     Number(row.order || index),
+      result[type].options.push({
+        id:        row.id || (type + '_' + index),
+        icon:      row.icon || '🎭',
+        title:     title,
+        desc:      row.description || row.desc || '',
+        detail,
+        link:      row.link || row.lien || '#',
+        destTitle: row.destTitle || row.dest_titre || row.destTitleText || title,
+        destDesc:  row.destDesc || row.dest_desc || row.description || row.desc || '',
+      });
     });
-  });
-
-  Object.values(result).forEach(group => group.options.sort((a, b) => a.order - b.order));
   return result;
 }
 

@@ -137,7 +137,41 @@ function listenQuestionnaire(){db.ref('fts_content/questionnaire/options').order
 function renderQList(){const el=document.getElementById('q-list');el.innerHTML=questionnaire.length?questionnaire.map(q=>`<div class="item" onclick="editQuestionnaire('${q.key}')"><div class="item-title">${FTS.esc(q.icon||'')} ${FTS.esc(q.title||q.titre||'Sans titre')}</div><div class="item-meta">${FTS.esc(q.type||'')} · ordre ${q.order||0}${q.active===false?' · masqué':''}</div></div>`).join(''):'<div class="hint">Aucune option.</div>'}
 function newQuestionnaire(){['q-key','q-title','q-desc','q-link','q-d1k','q-d1v','q-d2k','q-d2v','q-dtitle','q-ddesc'].forEach(id=>document.getElementById(id).value='');document.getElementById('q-type').value='adhesion';document.getElementById('q-icon').value='🎭';document.getElementById('q-order').value=(questionnaire.length+1)*10;document.getElementById('q-active').value='true'}
 function editQuestionnaire(key){const q=questionnaire.find(x=>x.key===key);if(!q)return;document.getElementById('q-key').value=key;document.getElementById('q-type').value=q.type||'adhesion';document.getElementById('q-order').value=q.order||10;document.getElementById('q-icon').value=q.icon||'';document.getElementById('q-active').value=String(q.active!==false);document.getElementById('q-title').value=q.title||q.titre||'';document.getElementById('q-desc').value=q.description||'';document.getElementById('q-link').value=q.link||q.lien||'';const ds=q.details||[];document.getElementById('q-d1k').value=ds[0]?.key||'';document.getElementById('q-d1v').value=ds[0]?.value||'';document.getElementById('q-d2k').value=ds[1]?.key||'';document.getElementById('q-d2v').value=ds[1]?.value||'';document.getElementById('q-dtitle').value=q.destTitle||q.dest_titre||'';document.getElementById('q-ddesc').value=q.destDesc||q.dest_desc||''}
-async function saveQuestionnaire(){const key=document.getElementById('q-key').value;const details=[];[['q-d1k','q-d1v'],['q-d2k','q-d2v']].forEach(([k,v])=>{const key=document.getElementById(k).value.trim(), val=document.getElementById(v).value.trim(); if(key&&val)details.push({key,value:val})});const data={type:document.getElementById('q-type').value,order:Number(document.getElementById('q-order').value||0),icon:document.getElementById('q-icon').value.trim(),active:document.getElementById('q-active').value==='true',title:document.getElementById('q-title').value.trim(),description:document.getElementById('q-desc').value.trim(),link:document.getElementById('q-link').value.trim(),destTitle:document.getElementById('q-dtitle').value.trim(),destDesc:document.getElementById('q-ddesc').value.trim(),details,updatedAt:Date.now()};if(!data.title){msg('msg-q','Titre requis',false);return}const ref=key?db.ref('fts_content/questionnaire/options/'+key):db.ref('fts_content/questionnaire/options').push();await ref.update(data);document.getElementById('q-key').value=ref.key;msg('msg-q','Option enregistrée')}
+async function saveQuestionnaire(){
+  const existingKey=document.getElementById('q-key').value;
+  const details=[];
+  [['q-d1k','q-d1v'],['q-d2k','q-d2v']].forEach(([k,v])=>{
+    const detailKey=document.getElementById(k).value.trim();
+    const val=document.getElementById(v).value.trim();
+    if(detailKey&&val)details.push({key:detailKey,value:val});
+  });
+  const title=document.getElementById('q-title').value.trim();
+  const description=document.getElementById('q-desc').value.trim();
+  const link=document.getElementById('q-link').value.trim();
+  const destTitle=document.getElementById('q-dtitle').value.trim();
+  const destDesc=document.getElementById('q-ddesc').value.trim();
+  const data={
+    type:document.getElementById('q-type').value,
+    order:Number(document.getElementById('q-order').value||0),
+    icon:document.getElementById('q-icon').value.trim(),
+    active:document.getElementById('q-active').value==='true',
+    title,titre:title,
+    description,desc:description,
+    link,lien:link,
+    destTitle,dest_titre:destTitle,
+    destDesc,dest_desc:destDesc,
+    details,
+    detail1_cle:details[0]?.key||'', detail1_valeur:details[0]?.value||'',
+    detail2_cle:details[1]?.key||'', detail2_valeur:details[1]?.value||'',
+    updatedAt:Date.now()
+  };
+  if(!data.title){msg('msg-q','Titre requis',false);return}
+  const ref=existingKey?db.ref('fts_content/questionnaire/options/'+existingKey):db.ref('fts_content/questionnaire/options').push();
+  if(!existingKey)data.createdAt=Date.now();
+  await ref.update(data);
+  document.getElementById('q-key').value=ref.key;
+  msg('msg-q','Option enregistrée');
+}
 async function deleteQuestionnaire(){const key=document.getElementById('q-key').value;if(!key||!confirm('Supprimer cette option ?'))return;await db.ref('fts_content/questionnaire/options/'+key).remove();newQuestionnaire();msg('msg-q','Option supprimée')}
 async function seedCategoriesIfEmpty(){const snap=await db.ref('fts_content/categories').once('value');if(snap.exists())return;const upd={};(FTS.DEFAULT_CATEGORIES||FTS.CATEGORIES||[]).forEach((c,i)=>{const key=FTS.norm(c.name||c.category);upd[key]={name:c.name||c.category,icon:c.icon||FTS.catIcon(c.name||c.category),order:c.order||((i+1)*10),active:true,subcats:{},createdAt:Date.now(),updatedAt:Date.now()};(c.subcats||[]).forEach(s=>{upd[key].subcats[FTS.norm(s)]={name:s,active:true,updatedAt:Date.now()};});});await db.ref('fts_content/categories').set(upd)}
 async function refreshCats(){categoryStructure = FTS.getCategoryStructureAsync ? await FTS.getCategoryStructureAsync(db) : FTS.getCategoryStructure(); await loadCategoriesRaw(); fillCats(); renderCList()}
@@ -147,7 +181,33 @@ function updateResourceSubcats(){const cat=(categoryStructure||[]).find(c=>c.cat
 function renderCList(){const el=document.getElementById('c-list');if(!el)return;el.innerHTML=categoriesRaw.length?categoriesRaw.map(c=>`<div class="item" onclick="editCategory('${c.key}')"><div class="item-title">${FTS.esc(c.icon||FTS.catIcon(c.name))} ${FTS.esc(c.name||'Sans nom')}</div><div class="item-meta">${(c.subcatsArray||[]).length} sous-catégorie${(c.subcatsArray||[]).length>1?'s':''} · ordre ${c.order||0}${c.active===false?' · masquée':''}</div></div>`).join(''):'<div class="hint">Aucune catégorie.</div>'}
 function newCategory(){['c-key','c-name','c-icon','c-subcats'].forEach(id=>document.getElementById(id).value='');document.getElementById('c-order').value=(categoriesRaw.length+1)*10;document.getElementById('c-active').value='true'}
 function editCategory(key){const c=categoriesRaw.find(x=>x.key===key);if(!c)return;document.getElementById('c-key').value=key;document.getElementById('c-name').value=c.name||'';document.getElementById('c-icon').value=c.icon||FTS.catIcon(c.name||'');document.getElementById('c-order').value=c.order||10;document.getElementById('c-active').value=String(c.active!==false);document.getElementById('c-subcats').value=(c.subcatsArray||[]).map(s=>s.name).join('\n')}
-async function saveCategory(){const oldKey=document.getElementById('c-key').value;const name=document.getElementById('c-name').value.trim();if(!name){msg('msg-c','Nom requis',false);return}const key=FTS.norm(name);const lines=document.getElementById('c-subcats').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);const subcats={};lines.forEach(x=>subcats[FTS.norm(x)]={name:x,active:true,updatedAt:Date.now()});const data={name,icon:document.getElementById('c-icon').value.trim()||FTS.catIcon(name),order:Number(document.getElementById('c-order').value||999),active:document.getElementById('c-active').value==='true',subcats,updatedAt:Date.now()};if(!oldKey)data.createdAt=Date.now();const updates={};updates['fts_content/categories/'+key]=data;if(oldKey&&oldKey!==key)updates['fts_content/categories/'+oldKey]=null;await db.ref().update(updates);await syncResourcesCategoryRename(oldKey,key,name);await refreshCats();document.getElementById('c-key').value=key;msg('msg-c','Catégorie enregistrée')}
+async function saveCategory(){
+  const oldKey=document.getElementById('c-key').value;
+  const name=document.getElementById('c-name').value.trim();
+  if(!name){msg('msg-c','Nom requis',false);return}
+  const key=FTS.norm(name);
+  const lines=document.getElementById('c-subcats').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  const subcats={};
+  lines.forEach(x=>subcats[FTS.norm(x)]={name:x,active:true,updatedAt:Date.now()});
+  const icon=document.getElementById('c-icon').value.trim()||FTS.catIcon(name);
+  const data={
+    name,category:name,
+    icon,emoji:icon,
+    order:Number(document.getElementById('c-order').value||999),
+    active:document.getElementById('c-active').value==='true',
+    subcats,updatedAt:Date.now()
+  };
+  if(!oldKey)data.createdAt=Date.now();
+  const updates={};
+  updates['fts_content/categories/'+key]=data;
+  if(oldKey&&oldKey!==key)updates['fts_content/categories/'+oldKey]=null;
+  await db.ref().update(updates);
+  await syncResourcesCategoryRename(oldKey,key,name);
+  await refreshCats();
+  document.getElementById('c-key').value=key;
+  editCategory(key);
+  msg('msg-c','Catégorie enregistrée');
+}
 async function syncResourcesCategoryRename(oldKey,newKey,newName){if(!oldKey||oldKey===newKey)return;const snap=await db.ref('fts_ressources').once('value');const updates={};if(snap.exists())snap.forEach(ch=>{const r=ch.val()||{};const cat=r.cat||r.category;if(FTS.norm(cat)===oldKey){updates['fts_ressources/'+ch.key+'/cat']=newName;updates['fts_ressources/'+ch.key+'/category']=newName;updates['fts_ressources/'+ch.key+'/updatedAt']=Date.now();}});if(Object.keys(updates).length)await db.ref().update(updates)}
 async function deleteCategory(){const key=document.getElementById('c-key').value;const name=document.getElementById('c-name').value.trim();if(!key||!name){msg('msg-c','Sélectionne une catégorie à supprimer',false);return}if(!confirm('Supprimer définitivement cette catégorie ET toutes les ressources liées dans Firebase ?'))return;const snap=await db.ref('fts_ressources').once('value');const updates={};updates['fts_content/categories/'+key]=null;if(snap.exists())snap.forEach(ch=>{const r=ch.val()||{};const cat=r.cat||r.category;if(FTS.norm(cat)===key)updates['fts_ressources/'+ch.key]=null;});await db.ref().update(updates);newCategory();await refreshCats();msg('msg-c','Catégorie et ressources liées supprimées')}
 function normalizeResource(r,key){
