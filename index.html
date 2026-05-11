@@ -320,15 +320,28 @@ let step3Options = {};
 async function loadQuestionnaire() {
   try {
     const db = FTS.initFirebase();
-    const snap = await db.ref('fts_content/questionnaire/options').orderByChild('order').once('value');
+    const snap = await db.ref('fts_content/questionnaire').once('value');
     const rows = [];
-    if (snap.exists()) {
-      snap.forEach(child => {
-        const v = child.val() || {};
-        if (v.active === false || v.status === 'inactive') return;
-        rows.push({ id: child.key, ...v });
-      });
-    }
+    const root = snap.val() || {};
+
+    // Format officiel : fts_content/questionnaire/options/{id}
+    const opts = root.options || {};
+    Object.keys(opts).forEach(key => {
+      const v = opts[key] || {};
+      if (v.active === false || v.status === 'inactive') return;
+      rows.push({ id: key, ...v });
+    });
+
+    // Compatibilité ancien format : fts_content/questionnaire/{id}
+    Object.keys(root).forEach(key => {
+      if (key === 'options' || key === 'settings') return;
+      const v = root[key];
+      if (!v || typeof v !== 'object') return;
+      if (!(v.type || v.title || v.titre || v.link || v.lien)) return;
+      if (v.active === false || v.status === 'inactive') return;
+      rows.push({ id: key, ...v });
+    });
+
     step3Options = buildStep3Options(rows);
   } catch (e) {
     console.warn('[FTS] Impossible de charger le questionnaire Firebase :', e);

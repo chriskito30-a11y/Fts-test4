@@ -126,35 +126,207 @@ input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:foc
 <script src="assets/js/fts-utils.js"></script>
 <script src="assets/js/fts-firebase.js"></script>
 <script>
-let db, auth, questionnaire=[], resources=[], categoryStructure=[], categoriesRaw=[];
-function msg(id, txt, ok=true){const el=document.getElementById(id); el.textContent=txt; el.className='msg '+(ok?'ok':'err'); setTimeout(()=>el.className='msg',2500)}
-function showTab(id,btn){document.querySelectorAll('.tab-lnk').forEach(b=>b.classList.remove('active'));btn.classList.add('active');document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));document.getElementById('tab-'+id).classList.add('active')}
-function doLogout(){firebase.auth().signOut().then(()=>location.href='auth.html')}
-function init(){db=FTS.initFirebase();auth=firebase.auth();auth.onAuthStateChanged(async user=>{if(!user){location.href='auth.html';return}const snap=await db.ref('fts_users/'+user.uid).once('value');const p=snap.val();if(!p||p.role!=='admin'){location.href='membres.html';return}document.getElementById('auth-loading').style.display='none';document.getElementById('admin-shell').style.display='block';await seedCategoriesIfEmpty();await refreshCats();await loadAnnonce();listenQuestionnaire();listenResources();})}
-async function loadAnnonce(){const s=await db.ref('fts_content/annonces/current').once('value');const a=s.val()||{};document.getElementById('a-active').value=String(a.active!==false);document.getElementById('a-title').value=a.title||'';document.getElementById('a-body').value=a.body||a.text||'';document.getElementById('a-btn').value=a.buttonText||'';document.getElementById('a-url').value=a.buttonUrl||''}
-async function saveAnnonce(){await db.ref('fts_content/annonces/current').set({active:document.getElementById('a-active').value==='true',title:document.getElementById('a-title').value.trim(),body:document.getElementById('a-body').value.trim(),buttonText:document.getElementById('a-btn').value.trim(),buttonUrl:document.getElementById('a-url').value.trim(),updatedAt:Date.now()});msg('msg-annonce','Annonce enregistrée')}
-function listenQuestionnaire(){db.ref('fts_content/questionnaire/options').orderByChild('order').on('value',s=>{questionnaire=[];if(s.exists())s.forEach(c=>questionnaire.push({key:c.key,...c.val()}));renderQList();if(!document.getElementById('q-key').value)newQuestionnaire()})}
-function renderQList(){const el=document.getElementById('q-list');el.innerHTML=questionnaire.length?questionnaire.map(q=>`<div class="item" onclick="editQuestionnaire('${q.key}')"><div class="item-title">${FTS.esc(q.icon||'')} ${FTS.esc(q.title||q.titre||'Sans titre')}</div><div class="item-meta">${FTS.esc(q.type||'')} · ordre ${q.order||0}${q.active===false?' · masqué':''}</div></div>`).join(''):'<div class="hint">Aucune option.</div>'}
-function newQuestionnaire(){['q-key','q-title','q-desc','q-link','q-d1k','q-d1v','q-d2k','q-d2v','q-dtitle','q-ddesc'].forEach(id=>document.getElementById(id).value='');document.getElementById('q-type').value='adhesion';document.getElementById('q-icon').value='🎭';document.getElementById('q-order').value=(questionnaire.length+1)*10;document.getElementById('q-active').value='true'}
-function editQuestionnaire(key){const q=questionnaire.find(x=>x.key===key);if(!q)return;document.getElementById('q-key').value=key;document.getElementById('q-type').value=q.type||'adhesion';document.getElementById('q-order').value=q.order||10;document.getElementById('q-icon').value=q.icon||'';document.getElementById('q-active').value=String(q.active!==false);document.getElementById('q-title').value=q.title||q.titre||'';document.getElementById('q-desc').value=q.description||'';document.getElementById('q-link').value=q.link||q.lien||'';const ds=q.details||[];document.getElementById('q-d1k').value=ds[0]?.key||'';document.getElementById('q-d1v').value=ds[0]?.value||'';document.getElementById('q-d2k').value=ds[1]?.key||'';document.getElementById('q-d2v').value=ds[1]?.value||'';document.getElementById('q-dtitle').value=q.destTitle||q.dest_titre||'';document.getElementById('q-ddesc').value=q.destDesc||q.dest_desc||''}
+let db, auth;
+let questionnaire = [];
+let resources = [];
+let categoryStructure = [];
+let categoriesRaw = [];
+let resourceListenerStarted = false;
+let questionnaireListenerStarted = false;
+
+function $(id){ return document.getElementById(id); }
+function msg(id, txt, ok=true){
+  const el=$(id); if(!el) return;
+  el.textContent=txt;
+  el.className='msg '+(ok?'ok':'err');
+  setTimeout(()=>{ el.className='msg'; }, 3000);
+}
+function showTab(id,btn){
+  document.querySelectorAll('.tab-lnk').forEach(b=>b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
+  $('tab-'+id)?.classList.add('active');
+  if(id==='questionnaire') renderQList();
+  if(id==='ressources') renderRList();
+  if(id==='categories') renderCList();
+}
+function doLogout(){ firebase.auth().signOut().then(()=>location.href='auth.html'); }
+
+function init(){
+  db=FTS.initFirebase();
+  auth=firebase.auth();
+  auth.onAuthStateChanged(async user=>{
+    if(!user){ location.href='auth.html'; return; }
+    const snap=await db.ref('fts_users/'+user.uid).once('value');
+    const p=snap.val();
+    if(!p || p.role!=='admin'){ location.href='membres.html'; return; }
+    $('auth-loading').style.display='none';
+    $('admin-shell').style.display='block';
+    await seedCategoriesIfEmpty();
+    listenCategories();
+    listenQuestionnaire();
+    listenResources();
+    await loadAnnonce();
+  });
+}
+
+/* ═══ ANNONCE ═══════════════════════════════════════════════ */
+async function loadAnnonce(){
+  const s=await db.ref('fts_content/annonces/current').once('value');
+  const a=s.val()||{};
+  $('a-active').value=String(a.active!==false);
+  $('a-title').value=a.title||'';
+  $('a-body').value=a.body||a.text||'';
+  $('a-btn').value=a.buttonText||'';
+  $('a-url').value=a.buttonUrl||'';
+}
+async function saveAnnonce(){
+  await db.ref('fts_content/annonces/current').set({
+    active:$('a-active').value==='true',
+    title:$('a-title').value.trim(),
+    body:$('a-body').value.trim(),
+    buttonText:$('a-btn').value.trim(),
+    buttonUrl:$('a-url').value.trim(),
+    updatedAt:Date.now()
+  });
+  msg('msg-annonce','Annonce enregistrée');
+}
+
+/* ═══ QUESTIONNAIRE ═══════════════════════════════════════════
+   Source officielle : fts_content/questionnaire/options
+   Compatibilité : si d'anciens items sont directement sous questionnaire,
+   on les lit aussi et on les migre à la prochaine sauvegarde.
+═══════════════════════════════════════════════════════════════ */
+function normalizeQuestionnaireItem(v={}, key=''){
+  const details = [];
+  if(Array.isArray(v.details)){
+    v.details.forEach(d=>{
+      const k=(d?.key||d?.cle||'').trim();
+      const val=(d?.value||d?.valeur||'').trim();
+      if(k && val) details.push({key:k, value:val});
+    });
+  }
+  const d1k=v.detail1_cle||v.detail1Key||v.detail1_key||'';
+  const d1v=v.detail1_valeur||v.detail1Value||v.detail1_value||'';
+  const d2k=v.detail2_cle||v.detail2Key||v.detail2_key||'';
+  const d2v=v.detail2_valeur||v.detail2Value||v.detail2_value||'';
+  if(!details.length && d1k && d1v) details.push({key:d1k, value:d1v});
+  if(details.length<2 && d2k && d2v) details.push({key:d2k, value:d2v});
+  const title=v.title||v.titre||'';
+  return {
+    ...v,
+    key,
+    type:v.type||'adhesion',
+    order:Number(v.order||999),
+    icon:v.icon||'🎭',
+    active:v.active!==false && v.status!=='inactive',
+    title,
+    titre:title,
+    description:v.description||v.desc||'',
+    link:v.link||v.lien||'',
+    lien:v.link||v.lien||'',
+    destTitle:v.destTitle||v.dest_titre||'',
+    destDesc:v.destDesc||v.dest_desc||'',
+    details
+  };
+}
+function listenQuestionnaire(){
+  if(questionnaireListenerStarted) return;
+  questionnaireListenerStarted = true;
+  db.ref('fts_content/questionnaire').on('value', snap=>{
+    const rows=[];
+    const root=snap.val()||{};
+
+    // Format officiel : questionnaire/options/{id}
+    const opts=root.options||{};
+    Object.keys(opts).forEach(key=>rows.push(normalizeQuestionnaireItem(opts[key], key)));
+
+    // Compatibilité ancien format : questionnaire/{id} avec champs type/title/link
+    Object.keys(root).forEach(key=>{
+      if(key==='options' || key==='settings') return;
+      const v=root[key];
+      if(v && typeof v==='object' && (v.type || v.title || v.titre || v.link || v.lien)){
+        rows.push(normalizeQuestionnaireItem({...v, _legacyPath:'fts_content/questionnaire/'+key}, key));
+      }
+    });
+
+    const seen=new Set();
+    questionnaire=rows.filter(q=>{
+      const id=q._legacyPath ? 'legacy:'+q.key : q.key;
+      if(seen.has(id)) return false;
+      seen.add(id);
+      return q.title || q.titre;
+    }).sort((a,b)=>(a.order||999)-(b.order||999)||(a.title||'').localeCompare(b.title||'', 'fr'));
+    renderQList();
+    if(!$('q-key').value && questionnaire.length) editQuestionnaire(questionnaire[0].key, questionnaire[0]._legacyPath);
+    if(!$('q-key').value && !questionnaire.length) newQuestionnaire();
+  }, err=>{
+    console.warn('[FTS Contenus] questionnaire', err);
+    msg('msg-q','Lecture questionnaire impossible : '+err.message,false);
+  });
+}
+function renderQList(){
+  const el=$('q-list'); if(!el) return;
+  const selected=$('q-key')?.value||'';
+  el.innerHTML=questionnaire.length ? questionnaire.map(q=>{
+    const legacyAttr=q._legacyPath ? ` data-legacy="${FTS.esc(q._legacyPath)}"` : '';
+    return `<div class="item${selected===q.key?' sel':''}" onclick="editQuestionnaire('${FTS.esc(q.key)}', this.dataset.legacy||'')"${legacyAttr}>
+      <div class="item-title">${FTS.esc(q.icon||'')} ${FTS.esc(q.title||q.titre||'Sans titre')}</div>
+      <div class="item-meta">${FTS.esc(q.type||'')} · ordre ${q.order||0}${q.active===false?' · masqué':''}${q._legacyPath?' · ancien emplacement':''}</div>
+    </div>`;
+  }).join('') : '<div class="hint">Aucune option.</div>';
+}
+function newQuestionnaire(){
+  ['q-key','q-title','q-desc','q-link','q-d1k','q-d1v','q-d2k','q-d2v','q-dtitle','q-ddesc'].forEach(id=>$(id).value='');
+  $('q-key').dataset.legacy='';
+  $('q-type').value='adhesion';
+  $('q-icon').value='🎭';
+  $('q-order').value=(questionnaire.length+1)*10;
+  $('q-active').value='true';
+  renderQList();
+}
+function editQuestionnaire(key, legacyPath=''){
+  const q=questionnaire.find(x=>x.key===key && (!legacyPath || x._legacyPath===legacyPath)) || questionnaire.find(x=>x.key===key);
+  if(!q) return;
+  $('q-key').value=key;
+  $('q-key').dataset.legacy=legacyPath || q._legacyPath || '';
+  $('q-type').value=q.type||'adhesion';
+  $('q-order').value=q.order||10;
+  $('q-icon').value=q.icon||'';
+  $('q-active').value=String(q.active!==false);
+  $('q-title').value=q.title||q.titre||'';
+  $('q-desc').value=q.description||q.desc||'';
+  $('q-link').value=q.link||q.lien||'';
+  const ds=q.details||[];
+  $('q-d1k').value=ds[0]?.key||'';
+  $('q-d1v').value=ds[0]?.value||'';
+  $('q-d2k').value=ds[1]?.key||'';
+  $('q-d2v').value=ds[1]?.value||'';
+  $('q-dtitle').value=q.destTitle||q.dest_titre||'';
+  $('q-ddesc').value=q.destDesc||q.dest_desc||'';
+  renderQList();
+}
 async function saveQuestionnaire(){
-  const existingKey=document.getElementById('q-key').value;
+  const existingKey=$('q-key').value;
+  const legacyPath=$('q-key').dataset.legacy||'';
   const details=[];
   [['q-d1k','q-d1v'],['q-d2k','q-d2v']].forEach(([k,v])=>{
-    const detailKey=document.getElementById(k).value.trim();
-    const val=document.getElementById(v).value.trim();
-    if(detailKey&&val)details.push({key:detailKey,value:val});
+    const detailKey=$(k).value.trim();
+    const val=$(v).value.trim();
+    if(detailKey && val) details.push({key:detailKey,value:val});
   });
-  const title=document.getElementById('q-title').value.trim();
-  const description=document.getElementById('q-desc').value.trim();
-  const link=document.getElementById('q-link').value.trim();
-  const destTitle=document.getElementById('q-dtitle').value.trim();
-  const destDesc=document.getElementById('q-ddesc').value.trim();
+  const title=$('q-title').value.trim();
+  const description=$('q-desc').value.trim();
+  const link=$('q-link').value.trim();
+  const destTitle=$('q-dtitle').value.trim();
+  const destDesc=$('q-ddesc').value.trim();
+  if(!title){ msg('msg-q','Titre requis',false); return; }
   const data={
-    type:document.getElementById('q-type').value,
-    order:Number(document.getElementById('q-order').value||0),
-    icon:document.getElementById('q-icon').value.trim(),
-    active:document.getElementById('q-active').value==='true',
+    type:$('q-type').value,
+    order:Number($('q-order').value||0),
+    icon:$('q-icon').value.trim(),
+    active:$('q-active').value==='true',
+    status:$('q-active').value==='true'?'active':'inactive',
     title,titre:title,
     description,desc:description,
     link,lien:link,
@@ -165,108 +337,226 @@ async function saveQuestionnaire(){
     detail2_cle:details[1]?.key||'', detail2_valeur:details[1]?.value||'',
     updatedAt:Date.now()
   };
-  if(!data.title){msg('msg-q','Titre requis',false);return}
-  const ref=existingKey?db.ref('fts_content/questionnaire/options/'+existingKey):db.ref('fts_content/questionnaire/options').push();
-  if(!existingKey)data.createdAt=Date.now();
-  await ref.update(data);
-  document.getElementById('q-key').value=ref.key;
+  const ref=(existingKey && !legacyPath) ? db.ref('fts_content/questionnaire/options/'+existingKey) : db.ref('fts_content/questionnaire/options').push();
+  if(!existingKey || legacyPath) data.createdAt=Date.now();
+  const updates={};
+  updates[ref.path.toString()]=data;
+  if(legacyPath) updates[legacyPath]=null;
+  await db.ref().update(updates);
+  $('q-key').value=ref.key;
+  $('q-key').dataset.legacy='';
   msg('msg-q','Option enregistrée');
 }
-async function deleteQuestionnaire(){const key=document.getElementById('q-key').value;if(!key||!confirm('Supprimer cette option ?'))return;await db.ref('fts_content/questionnaire/options/'+key).remove();newQuestionnaire();msg('msg-q','Option supprimée')}
-async function seedCategoriesIfEmpty(){const snap=await db.ref('fts_content/categories').once('value');if(snap.exists())return;const upd={};(FTS.DEFAULT_CATEGORIES||FTS.CATEGORIES||[]).forEach((c,i)=>{const key=FTS.norm(c.name||c.category);upd[key]={name:c.name||c.category,icon:c.icon||FTS.catIcon(c.name||c.category),order:c.order||((i+1)*10),active:true,subcats:{},createdAt:Date.now(),updatedAt:Date.now()};(c.subcats||[]).forEach(s=>{upd[key].subcats[FTS.norm(s)]={name:s,active:true,updatedAt:Date.now()};});});await db.ref('fts_content/categories').set(upd)}
-async function refreshCats(){categoryStructure = FTS.getCategoryStructureAsync ? await FTS.getCategoryStructureAsync(db) : FTS.getCategoryStructure(); await loadCategoriesRaw(); fillCats(); renderCList()}
-async function loadCategoriesRaw(){const snap=await db.ref('fts_content/categories').once('value');categoriesRaw=[];if(snap.exists())snap.forEach(c=>{const v=c.val()||{};let subs=[];if(v.subcats)Object.values(v.subcats).forEach(s=>{if(typeof s==='string')subs.push({name:s,active:true});else if(s&&s.active!==false)subs.push({name:s.name||s.label,active:s.active!==false})});categoriesRaw.push({key:c.key,...v,subcatsArray:subs.filter(x=>x.name)});});categoriesRaw.sort((a,b)=>(a.order||999)-(b.order||999)||(a.name||'').localeCompare(b.name||'', 'fr'))}
-function fillCats(){const sel=document.getElementById('r-cat');sel.innerHTML=(categoryStructure||[]).map(c=>`<option value="${FTS.esc(c.category)}">${FTS.esc(c.icon||FTS.catIcon(c.category))} ${FTS.esc(c.category)}</option>`).join('');updateResourceSubcats()}
-function updateResourceSubcats(){const cat=(categoryStructure||[]).find(c=>c.category===document.getElementById('r-cat').value);document.getElementById('r-subcat').innerHTML='<option value="">-- Aucune --</option>'+(((cat&&cat.subs)||[]).map(s=>`<option value="${FTS.esc(s.name)}">${FTS.esc(s.name)}</option>`).join(''))}
-function renderCList(){const el=document.getElementById('c-list');if(!el)return;el.innerHTML=categoriesRaw.length?categoriesRaw.map(c=>`<div class="item" onclick="editCategory('${c.key}')"><div class="item-title">${FTS.esc(c.icon||FTS.catIcon(c.name))} ${FTS.esc(c.name||'Sans nom')}</div><div class="item-meta">${(c.subcatsArray||[]).length} sous-catégorie${(c.subcatsArray||[]).length>1?'s':''} · ordre ${c.order||0}${c.active===false?' · masquée':''}</div></div>`).join(''):'<div class="hint">Aucune catégorie.</div>'}
-function newCategory(){['c-key','c-name','c-icon','c-subcats'].forEach(id=>document.getElementById(id).value='');document.getElementById('c-order').value=(categoriesRaw.length+1)*10;document.getElementById('c-active').value='true'}
-function editCategory(key){const c=categoriesRaw.find(x=>x.key===key);if(!c)return;document.getElementById('c-key').value=key;document.getElementById('c-name').value=c.name||'';document.getElementById('c-icon').value=c.icon||FTS.catIcon(c.name||'');document.getElementById('c-order').value=c.order||10;document.getElementById('c-active').value=String(c.active!==false);document.getElementById('c-subcats').value=(c.subcatsArray||[]).map(s=>s.name).join('\n')}
+async function deleteQuestionnaire(){
+  const key=$('q-key').value;
+  const legacyPath=$('q-key').dataset.legacy||'';
+  if(!key || !confirm('Supprimer cette option ?')) return;
+  if(legacyPath) await db.ref(legacyPath).remove();
+  else await db.ref('fts_content/questionnaire/options/'+key).remove();
+  newQuestionnaire();
+  msg('msg-q','Option supprimée');
+}
+
+/* ═══ CATÉGORIES ══════════════════════════════════════════════ */
+async function seedCategoriesIfEmpty(){
+  const snap=await db.ref('fts_content/categories').once('value');
+  if(snap.exists()) return;
+  const upd={};
+  (FTS.DEFAULT_CATEGORIES||FTS.CATEGORIES||[]).forEach((c,i)=>{
+    const name=c.name||c.category;
+    const key=FTS.norm(name);
+    upd[key]={name,category:name,icon:c.icon||FTS.catIcon(name),order:c.order||((i+1)*10),active:true,subcats:{},createdAt:Date.now(),updatedAt:Date.now()};
+    (c.subcats||[]).forEach(s=>{upd[key].subcats[FTS.norm(s)]={name:s,active:true,updatedAt:Date.now()};});
+  });
+  await db.ref('fts_content/categories').set(upd);
+}
+function listenCategories(){
+  db.ref('fts_content/categories').on('value', snap=>{
+    categoriesRaw=[];
+    if(snap.exists()) snap.forEach(c=>{
+      const v=c.val()||{};
+      let subs=[];
+      const raw=v.subcats||v.subcategories||{};
+      if(Array.isArray(raw)) raw.forEach(s=>{ if(typeof s==='string') subs.push({name:s,active:true}); else if(s && s.active!==false && (s.name||s.label)) subs.push({name:s.name||s.label,active:true}); });
+      else Object.values(raw).forEach(s=>{ if(typeof s==='string') subs.push({name:s,active:true}); else if(s && s.active!==false && (s.name||s.label)) subs.push({name:s.name||s.label,active:true}); });
+      categoriesRaw.push({key:c.key,...v,subcatsArray:subs.filter(x=>x.name)});
+    });
+    categoriesRaw.sort((a,b)=>(a.order||999)-(b.order||999)||(a.name||'').localeCompare(b.name||'', 'fr'));
+    categoryStructure=categoriesRaw.filter(c=>c.active!==false).map(c=>({
+      key:c.key,
+      category:c.name||c.category||c.key,
+      name:c.name||c.category||c.key,
+      icon:c.icon||c.emoji||FTS.catIcon(c.name||c.category||c.key),
+      order:c.order||999,
+      active:c.active!==false,
+      subs:(c.subcatsArray||[]).filter(s=>s.active!==false)
+    }));
+    fillCats();
+    renderCList();
+  }, err=>console.warn('[FTS Contenus] categories', err));
+}
+function fillCats(){
+  const sel=$('r-cat'); if(!sel) return;
+  const current=sel.value;
+  sel.innerHTML=(categoryStructure||[]).map(c=>`<option value="${FTS.esc(c.category)}">${FTS.esc(c.icon||FTS.catIcon(c.category))} ${FTS.esc(c.category)}</option>`).join('');
+  if(current && [...sel.options].some(o=>o.value===current)) sel.value=current;
+  updateResourceSubcats();
+}
+function updateResourceSubcats(){
+  const sub=$('r-subcat'); if(!sub) return;
+  const current=sub.value;
+  const cat=(categoryStructure||[]).find(c=>c.category===$('r-cat').value);
+  sub.innerHTML='<option value="">-- Aucune --</option>'+(((cat&&cat.subs)||[]).map(s=>`<option value="${FTS.esc(s.name)}">${FTS.esc(s.name)}</option>`).join(''));
+  if(current && [...sub.options].some(o=>o.value===current)) sub.value=current;
+}
+function renderCList(){
+  const el=$('c-list'); if(!el) return;
+  const selected=$('c-key')?.value||'';
+  el.innerHTML=categoriesRaw.length?categoriesRaw.map(c=>`<div class="item${selected===c.key?' sel':''}" onclick="editCategory('${FTS.esc(c.key)}')"><div class="item-title">${FTS.esc(c.icon||FTS.catIcon(c.name))} ${FTS.esc(c.name||c.category||'Sans nom')}</div><div class="item-meta">${(c.subcatsArray||[]).length} sous-catégorie${(c.subcatsArray||[]).length>1?'s':''} · ordre ${c.order||0}${c.active===false?' · masquée':''}</div></div>`).join(''):'<div class="hint">Aucune catégorie.</div>';
+}
+function newCategory(){
+  ['c-key','c-name','c-icon','c-subcats'].forEach(id=>$(id).value='');
+  $('c-order').value=(categoriesRaw.length+1)*10;
+  $('c-active').value='true';
+  renderCList();
+}
+function editCategory(key){
+  const c=categoriesRaw.find(x=>x.key===key); if(!c)return;
+  $('c-key').value=key;
+  $('c-name').value=c.name||c.category||'';
+  $('c-icon').value=c.icon||c.emoji||FTS.catIcon(c.name||c.category||'');
+  $('c-order').value=c.order||10;
+  $('c-active').value=String(c.active!==false);
+  $('c-subcats').value=(c.subcatsArray||[]).map(s=>s.name).join('\n');
+  renderCList();
+}
 async function saveCategory(){
-  const oldKey=document.getElementById('c-key').value;
-  const name=document.getElementById('c-name').value.trim();
-  if(!name){msg('msg-c','Nom requis',false);return}
+  const oldKey=$('c-key').value;
+  const name=$('c-name').value.trim();
+  if(!name){ msg('msg-c','Nom requis',false); return; }
   const key=FTS.norm(name);
-  const lines=document.getElementById('c-subcats').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  const lines=$('c-subcats').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
   const subcats={};
   lines.forEach(x=>subcats[FTS.norm(x)]={name:x,active:true,updatedAt:Date.now()});
-  const icon=document.getElementById('c-icon').value.trim()||FTS.catIcon(name);
-  const data={
-    name,category:name,
-    icon,emoji:icon,
-    order:Number(document.getElementById('c-order').value||999),
-    active:document.getElementById('c-active').value==='true',
-    subcats,updatedAt:Date.now()
-  };
-  if(!oldKey)data.createdAt=Date.now();
+  const icon=$('c-icon').value.trim()||FTS.catIcon(name);
+  const data={name,category:name,icon,emoji:icon,order:Number($('c-order').value||999),active:$('c-active').value==='true',subcats,updatedAt:Date.now()};
+  if(!oldKey) data.createdAt=Date.now();
   const updates={};
   updates['fts_content/categories/'+key]=data;
-  if(oldKey&&oldKey!==key)updates['fts_content/categories/'+oldKey]=null;
+  if(oldKey&&oldKey!==key) updates['fts_content/categories/'+oldKey]=null;
   await db.ref().update(updates);
   await syncResourcesCategoryRename(oldKey,key,name);
-  await refreshCats();
-  document.getElementById('c-key').value=key;
-  editCategory(key);
+  $('c-key').value=key;
   msg('msg-c','Catégorie enregistrée');
 }
-async function syncResourcesCategoryRename(oldKey,newKey,newName){if(!oldKey||oldKey===newKey)return;const snap=await db.ref('fts_ressources').once('value');const updates={};if(snap.exists())snap.forEach(ch=>{const r=ch.val()||{};const cat=r.cat||r.category;if(FTS.norm(cat)===oldKey){updates['fts_ressources/'+ch.key+'/cat']=newName;updates['fts_ressources/'+ch.key+'/category']=newName;updates['fts_ressources/'+ch.key+'/updatedAt']=Date.now();}});if(Object.keys(updates).length)await db.ref().update(updates)}
-async function deleteCategory(){const key=document.getElementById('c-key').value;const name=document.getElementById('c-name').value.trim();if(!key||!name){msg('msg-c','Sélectionne une catégorie à supprimer',false);return}if(!confirm('Supprimer définitivement cette catégorie ET toutes les ressources liées dans Firebase ?'))return;const snap=await db.ref('fts_ressources').once('value');const updates={};updates['fts_content/categories/'+key]=null;if(snap.exists())snap.forEach(ch=>{const r=ch.val()||{};const cat=r.cat||r.category;if(FTS.norm(cat)===key)updates['fts_ressources/'+ch.key]=null;});await db.ref().update(updates);newCategory();await refreshCats();msg('msg-c','Catégorie et ressources liées supprimées')}
-function normalizeResource(r,key){
-  r=r||{};
-  const cat=r.cat||r.category||r.categorie||'';
-  const subcat=r.subcat||r.subcategory||r.sousCategorie||r['Sous-categorie']||'';
-  const name=r.name||r.nom||r.titre||r.title||'Sans titre';
-  const content=r.content||r.url||r.link||r.text||'';
-  return {...r,key,cat,category:cat,subcat,subcategory:subcat,name,content,url:content,type:r.type||'doc',active:r.active!==false&&r.status!=='inactive'};
-}
-async function loadResourcesOnce(){
+async function syncResourcesCategoryRename(oldKey,newKey,newName){
+  if(!oldKey || oldKey===newKey) return;
   const snap=await db.ref('fts_ressources').once('value');
-  resources=[];
-  if(snap.exists())snap.forEach(c=>resources.push(normalizeResource(c.val(),c.key)));
-  resources.sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0));
-  renderRList();
-  return resources;
+  const updates={};
+  if(snap.exists()) snap.forEach(ch=>{
+    const r=ch.val()||{};
+    const cat=r.cat||r.category;
+    if(FTS.norm(cat)===oldKey){
+      updates['fts_ressources/'+ch.key+'/cat']=newName;
+      updates['fts_ressources/'+ch.key+'/category']=newName;
+      updates['fts_ressources/'+ch.key+'/updatedAt']=Date.now();
+    }
+  });
+  if(Object.keys(updates).length) await db.ref().update(updates);
+}
+async function deleteCategory(){
+  const key=$('c-key').value;
+  const name=$('c-name').value.trim();
+  if(!key||!name){ msg('msg-c','Sélectionne une catégorie à supprimer',false); return; }
+  if(!confirm('Supprimer définitivement cette catégorie ET toutes les ressources liées dans Firebase ?')) return;
+  const snap=await db.ref('fts_ressources').once('value');
+  const updates={};
+  updates['fts_content/categories/'+key]=null;
+  if(snap.exists()) snap.forEach(ch=>{
+    const r=ch.val()||{};
+    const cat=r.cat||r.category;
+    if(FTS.norm(cat)===key) updates['fts_ressources/'+ch.key]=null;
+  });
+  await db.ref().update(updates);
+  newCategory();
+  msg('msg-c','Catégorie et ressources liées supprimées');
+}
+
+/* ═══ RESSOURCES ══════════════════════════════════════════════ */
+function normalizeResource(r={},key=''){
+  const cat=r.cat||r.category||r.categorie||r.Categorie||'';
+  const subcat=r.subcat||r.subcategory||r.sousCategorie||r.sous_categorie||r['Sous-categorie']||r['Sous-catégorie']||'';
+  const name=r.name||r.nom||r.Nom||r.titre||r.title||'Sans titre';
+  const content=r.content||r.url||r.link||r.lien||r.text||r['Contenu ou Lien Google Drive']||'';
+  return {...r,key,cat,category:cat,subcat,subcategory:subcat,name,content,url:content,type:r.type||r.Type||'doc',active:r.active!==false&&r.status!=='inactive'};
 }
 function listenResources(){
-  db.ref('fts_ressources').on('value',s=>{
+  if(resourceListenerStarted) return;
+  resourceListenerStarted=true;
+  db.ref('fts_ressources').on('value', snap=>{
     resources=[];
-    if(s.exists())s.forEach(c=>resources.push(normalizeResource(c.val(),c.key)));
+    if(snap.exists()) snap.forEach(c=>resources.push(normalizeResource(c.val(),c.key)));
     resources.sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0));
     renderRList();
-    if(!document.getElementById('r-key').value)newResource();
-  },err=>{console.warn('[FTS Contenus] ressources',err);renderRList();});
+    if(!$('r-key').value && resources.length) editResource(resources[0].key);
+    if(!$('r-key').value && !resources.length) newResource();
+  }, err=>{
+    console.warn('[FTS Contenus] ressources',err);
+    msg('msg-r','Lecture ressources impossible : '+err.message,false);
+  });
 }
 function renderRList(){
-  const el=document.getElementById('r-list'); if(!el)return;
-  el.innerHTML=resources.length?resources.map(r=>`<div class="item${document.getElementById('r-key')?.value===r.key?' sel':''}" onclick="editResource('${r.key}')"><div class="item-title">${FTS.esc(r.name||'Sans titre')}</div><div class="item-meta">${FTS.esc(r.cat||r.category||'Sans catégorie')} ${r.subcat?'· '+FTS.esc(r.subcat):''} · ${FTS.esc(r.type||'doc')}${r.active===false||r.status==='inactive'?' · masqué':''}</div></div>`).join(''):'<div class="hint">Aucune ressource.</div>';
+  const el=$('r-list'); if(!el) return;
+  const selected=$('r-key')?.value||'';
+  el.innerHTML=resources.length?resources.map(r=>`<div class="item${selected===r.key?' sel':''}" onclick="editResource('${FTS.esc(r.key)}')"><div class="item-title">${FTS.esc(r.name||'Sans titre')}</div><div class="item-meta">${FTS.esc(r.cat||r.category||'Sans catégorie')}${r.subcat?' · '+FTS.esc(r.subcat):''} · ${FTS.esc(r.type||'doc')}${r.active===false||r.status==='inactive'?' · masqué':''}</div></div>`).join(''):'<div class="hint">Aucune ressource.</div>';
 }
-function newResource(){['r-key','r-name','r-url','r-cat-new','r-subcat-new'].forEach(id=>document.getElementById(id).value='');document.getElementById('r-type').value='pdf';document.getElementById('r-active').value='true';fillCats();renderRList()}
-function editResource(key){const r=resources.find(x=>x.key===key);if(!r)return;document.getElementById('r-key').value=key;document.getElementById('r-cat-new').value='';document.getElementById('r-subcat-new').value='';document.getElementById('r-cat').value=r.cat||r.category||'';updateResourceSubcats();document.getElementById('r-subcat').value=r.subcat||r.subcategory||'';document.getElementById('r-type').value=r.type||'doc';document.getElementById('r-active').value=String(r.active!==false && r.status!=='inactive');document.getElementById('r-name').value=r.name||'';document.getElementById('r-url').value=r.url||r.content||r.text||'';renderRList()}
+function newResource(){
+  ['r-key','r-name','r-url','r-cat-new','r-subcat-new'].forEach(id=>$(id).value='');
+  $('r-type').value='pdf';
+  $('r-active').value='true';
+  fillCats();
+  renderRList();
+}
+function editResource(key){
+  const r=resources.find(x=>x.key===key); if(!r)return;
+  $('r-key').value=key;
+  $('r-cat-new').value='';
+  $('r-subcat-new').value='';
+  fillCats();
+  if(r.cat && [...$('r-cat').options].some(o=>o.value===r.cat)) $('r-cat').value=r.cat;
+  updateResourceSubcats();
+  if(r.subcat && [...$('r-subcat').options].some(o=>o.value===r.subcat)) $('r-subcat').value=r.subcat;
+  $('r-type').value=r.type||'doc';
+  $('r-active').value=String(r.active!==false && r.status!=='inactive');
+  $('r-name').value=r.name||'';
+  $('r-url').value=r.url||r.content||r.text||'';
+  renderRList();
+}
 async function saveResource(){
-  const key=document.getElementById('r-key').value;
-  const cat=(document.getElementById('r-cat-new').value.trim()||document.getElementById('r-cat').value);
-  const subcat=(document.getElementById('r-subcat-new').value.trim()||document.getElementById('r-subcat').value);
-  const active=document.getElementById('r-active').value==='true';
-  const content=document.getElementById('r-url').value.trim();
+  const key=$('r-key').value;
+  const cat=($('r-cat-new').value.trim() || $('r-cat').value || '').trim();
+  const subcat=($('r-subcat-new').value.trim() || $('r-subcat').value || '').trim();
+  const active=$('r-active').value==='true';
+  const content=$('r-url').value.trim();
+  const name=$('r-name').value.trim();
   const now=Date.now();
-  const data={cat,category:cat,subcat,subcategory:subcat,type:document.getElementById('r-type').value,active,status:active?'active':'inactive',visibility:'members',name:document.getElementById('r-name').value.trim(),url:content,content,updatedAt:now};
-  if(!data.cat||!data.name){msg('msg-r','Catégorie et nom requis',false);return}
-  if(!key)data.createdAt=now;
+  if(!cat||!name){ msg('msg-r','Catégorie et nom requis',false); return; }
+  const data={cat,category:cat,subcat,subcategory:subcat,type:$('r-type').value,active,status:active?'active':'inactive',visibility:'members',name,url:content,content,updatedAt:now};
+  if(!key) data.createdAt=now;
   const ref=key?db.ref('fts_ressources/'+key):db.ref('fts_ressources').push();
   await ref.update(data);
-  await FTS.ensureResourceCategory(db,data);
-  document.getElementById('r-key').value=ref.key;
-  await refreshCats();
-  await loadResourcesOnce();
-  editResource(ref.key);
-  msg('msg-r','Ressource enregistrée et affichée dans la liste')
+  if(FTS.ensureResourceCategory) await FTS.ensureResourceCategory(db,data);
+  $('r-key').value=ref.key;
+  msg('msg-r','Ressource enregistrée');
 }
 async function deleteResource(){
-  const key=document.getElementById('r-key').value;if(!key||!confirm('Supprimer cette ressource dans Firebase ?'))return;
+  const key=$('r-key').value;
+  if(!key || !confirm('Supprimer cette ressource dans Firebase ?')) return;
   await db.ref('fts_ressources/'+key).remove();
   newResource();
-  await loadResourcesOnce();
-  msg('msg-r','Ressource supprimée')
+  msg('msg-r','Ressource supprimée');
 }
+
 init();
 </script>
 </body>
