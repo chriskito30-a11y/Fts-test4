@@ -1,58 +1,67 @@
 /* ================================================================
-   FTS-PWA.JS — Service Worker + Prompt d'installation
-   À inclure en dernier dans toutes les pages (avant </body>).
-   Nécessite un élément #install-bar dans le HTML de la page.
+   FTS PWA — auto-update Service Worker
+   ✅ Détecte une nouvelle version de sw.js
+   ✅ Active immédiatement le nouveau SW
+   ✅ Recharge une seule fois la page pour utiliser les nouveaux fichiers
    ================================================================ */
-'use strict';
-/* ── REGISTRATION SERVICE WORKER ─────────────────────────────── */
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', function() {
-    navigator.serviceWorker.register('./sw.js', { scope: './' })
-      .then(() => console.log('[FTS] Service Worker enregistré'))
-      .catch(err => console.warn('[FTS] SW registration failed:', err));
-  });
-}
-/* ── INSTALL PROMPT PWA ───────────────────────────────────────── */
-(function() {
-  // Si déjà refusé, on n'affiche plus
-  if (localStorage.getItem('fts_install_dismissed')) return;
-  const bar      = document.getElementById('install-bar');
-  if (!bar) return;
-  const msg      = document.getElementById('install-msg');
-  const btn      = document.getElementById('btn-install');
-  const closeBtn = document.getElementById('btn-close-bar');
-  let deferredPrompt = null;
-  function show() { bar.classList.add('show'); }
-  function hide() {
-    bar.classList.remove('show');
-    localStorage.setItem('fts_install_dismissed', '1');
+(function(){
+  if (!('serviceWorker' in navigator)) return;
+
+  const SW_URL = './sw.js';
+  const RELOAD_KEY = 'fts-sw-reload-v12-auto-update';
+  let refreshing = false;
+
+  function safeReloadOnce(){
+    if (refreshing) return;
+    refreshing = true;
+    if (!sessionStorage.getItem(RELOAD_KEY)) {
+      sessionStorage.setItem(RELOAD_KEY, '1');
+      window.location.reload();
+    }
   }
-  // iOS — instruction manuelle
-  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
-  if (isIOS && !window.navigator.standalone) {
-    if (msg) msg.innerHTML = "Installe l'appli : appuie sur <span>⬆</span> puis <span>Ajouter à l'écran d'accueil</span>";
-    if (btn) btn.style.display = 'none';
-    show();
-  }
-  // Android / Chrome — prompt natif
-  window.addEventListener('beforeinstallprompt', function(e) {
-    e.preventDefault();
-    deferredPrompt = e;
-    if (msg) msg.innerHTML = "Installe l'appli <span>Fais Ton Show</span> sur ton téléphone !";
-    if (btn) btn.style.display = '';
-    show();
+
+  navigator.serviceWorker.addEventListener('controllerchange', function(){
+    safeReloadOnce();
   });
-  if (btn) {
-    btn.addEventListener('click', function() {
-      if (!deferredPrompt) return;
-      deferredPrompt.prompt();
-      deferredPrompt.userChoice.then(() => {
-        deferredPrompt = null;
-        hide();
+
+  navigator.serviceWorker.addEventListener('message', function(event){
+    if (event.data && event.data.type === 'FTS_SW_ACTIVATED') {
+      safeReloadOnce();
+    }
+  });
+
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register(SW_URL, { scope: './', updateViaCache: 'none' })
+      .then(function(reg){
+        function activateWaitingWorker(){
+          if (reg.waiting) {
+            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+          }
+        }
+
+        activateWaitingWorker();
+
+        reg.addEventListener('updatefound', function(){
+          const newWorker = reg.installing;
+          if (!newWorker) return;
+
+          newWorker.addEventListener('statechange', function(){
+            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+              newWorker.postMessage({ type: 'SKIP_WAITING' });
+            }
+          });
+        });
+
+        // Vérifie régulièrement les mises à jour quand l'app reste ouverte.
+        setInterval(function(){ reg.update().catch(function(){}); }, 60 * 60 * 1000);
+
+        // Vérifie aussi quand l'utilisateur revient sur l'app.
+        document.addEventListener('visibilitychange', function(){
+          if (!document.hidden) reg.update().catch(function(){});
+        });
+      })
+      .catch(function(err){
+        console.warn('[FTS PWA] Service worker non enregistré', err);
       });
-    });
-  }
-  if (closeBtn) {
-    closeBtn.addEventListener('click', hide);
-  }
+  });
 })();
