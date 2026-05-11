@@ -294,7 +294,7 @@
       <div class="dash-sub">Admin Forum</div>
     </div>
     <div class="dash-actions">
-      <a class="btn-admin-link" href="saison-admin.html">📅 Admin saison</a>
+      <a class="btn-admin-link" href="contenus-admin.html">🧩 Admin contenus</a><a class="btn-admin-link" href="saison-admin.html">📅 Admin saison</a>
       <button class="btn-logout" onclick="doLogout()">Déconnexion</button>
     </div>
   </div>
@@ -417,15 +417,13 @@ function doLogout() {
 
 /* ── CHARGEMENT GROUPES ──────────────────────────────────────── */
 async function loadGroups() {
-  try {
-    const r    = await FTS.fetch(FTS.SHEETS.ressources);
-    const text = await r.text();
-    const rows = FTS.parseCSVRaw(text);
-    allGroups  = rows.map(row => ({
-      cat: (row[0] || "").trim(),
-      sub: (row[1] || "").trim(),
-    }));
-  } catch(e) {}
+  allGroups = [];
+  if (FTS.CATEGORIES) {
+    FTS.CATEGORIES.forEach(c => {
+      allGroups.push({ cat: c.name, sub: '' });
+      (c.subcats || []).forEach(sub => allGroups.push({ cat: c.name, sub }));
+    });
+  }
 }
 
 /* ── ÉCOUTE TEMPS RÉEL ───────────────────────────────────────── */

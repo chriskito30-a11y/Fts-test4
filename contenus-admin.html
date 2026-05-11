@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin Contenus — Fais Ton Show</title>
+<link rel="manifest" href="/manifest.json">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/fts.css">
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+<style>
+.auth-loading{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1rem}.spinner{width:24px;height:24px;border:2px solid #333;border-top-color:var(--red);border-radius:50%;animation:spin .7s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.admin-shell{display:none}.topbar{background:var(--grey2);border-bottom:1px solid var(--border);padding:1rem 1.5rem;display:flex;align-items:center;justify-content:space-between;gap:1rem}.logo{font-family:var(--font-display);font-size:1.5rem}.logo span{color:var(--red)}.sub{font-size:.65rem;color:var(--muted);letter-spacing:.12em;text-transform:uppercase}.actions{display:flex;gap:.5rem;flex-wrap:wrap}.btn-sm{width:auto;font-family:var(--font-body);font-size:.76rem;letter-spacing:0;padding:.55rem .9rem}.btn-dark{background:#242424}.btn-dark:hover{background:#303030}.wrap-admin{max-width:1100px;margin:0 auto;padding:1.5rem}.tabs-row{display:flex;border-bottom:1px solid var(--border);margin-bottom:1.2rem;overflow:auto}.tab-lnk{padding:.8rem 1rem;background:transparent;border:0;border-bottom:2px solid transparent;color:var(--muted);font-family:var(--font-body);cursor:pointer;white-space:nowrap}.tab-lnk.active{color:var(--white);border-bottom-color:var(--red)}.tab-pane{display:none}.tab-pane.active{display:block}.grid{display:grid;grid-template-columns:330px 1fr;gap:1rem}.card-admin{background:var(--grey);border:1px solid var(--border);border-radius:var(--r-md);padding:1rem}.mini-title{font-size:.62rem;letter-spacing:.18em;text-transform:uppercase;color:var(--gold);margin-bottom:1rem}.list{display:flex;flex-direction:column;gap:.45rem;max-height:68vh;overflow:auto}.item{background:#141414;border:1px solid var(--border);border-radius:var(--r-sm);padding:.7rem .8rem;cursor:pointer}.item:hover,.item.sel{border-color:var(--red);background:rgba(212,32,26,.08)}.item-title{font-size:.86rem;color:var(--white)}.item-meta{font-size:.68rem;color:var(--muted);margin-top:.15rem}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:.8rem}.full{grid-column:1/-1}.field{margin-bottom:.8rem}.field label{font-size:.62rem;letter-spacing:.08em;text-transform:uppercase}.field input,.field textarea,.field select{background:#0e0e0e}.field textarea{min-height:78px}.row-actions{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:1rem}.msg{display:none;margin-top:.8rem;padding:.75rem 1rem;border-radius:var(--r-sm);font-size:.8rem}.msg.ok{display:block;background:rgba(50,120,50,.15);border:1px solid #2a5a2a;color:#6aba6a}.msg.err{display:block;background:rgba(212,32,26,.1);border:1px solid rgba(212,32,26,.3);color:#e07070}.danger{border-color:#5a2020;color:#aa6060;background:transparent}.danger:hover{background:rgba(212,32,26,.1);color:var(--red)}.hint{font-size:.72rem;color:var(--muted);line-height:1.5}.details-grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}@media(max-width:820px){.topbar{align-items:flex-start;flex-direction:column}.grid,.form-grid{grid-template-columns:1fr}.list{max-height:none}.full{grid-column:auto}}
+</style>
+</head>
+<body class="has-glow">
+<div class="auth-loading" id="auth-loading"><div class="logo">ADMIN <span>CONTENUS</span></div><div class="spinner"></div><div class="sub">Vérification accès admin…</div></div>
+<div class="admin-shell" id="admin-shell">
+  <div class="topbar"><div><div class="logo">ADMIN <span>CONTENUS</span></div><div class="sub">Annonces · questionnaire · ressources Firebase</div></div><div class="actions"><a class="btn btn-sm btn-dark" href="membres.html">Membres</a><a class="btn btn-sm btn-dark" href="forum-admin.html">Admin forum</a><a class="btn btn-sm btn-dark" href="saison-admin.html">Admin saison</a><button class="btn-outline" onclick="doLogout()">Déconnexion</button></div></div>
+  <div class="wrap-admin">
+    <div class="tabs-row"><button class="tab-lnk active" onclick="showTab('annonces',this)">📣 Annonce</button><button class="tab-lnk" onclick="showTab('questionnaire',this)">🧭 Questionnaire</button><button class="tab-lnk" onclick="showTab('ressources',this)">📁 Ressources</button></div>
+
+    <section class="tab-pane active" id="tab-annonces">
+      <div class="card-admin"><div class="mini-title">Annonce affichée dans l’espace membres</div>
+        <div class="form-grid">
+          <div class="field"><label>Statut</label><select id="a-active"><option value="true">Active</option><option value="false">Inactive</option></select></div>
+          <div class="field"><label>Titre</label><input id="a-title" placeholder="Info importante"></div>
+          <div class="field full"><label>Texte</label><textarea id="a-body" placeholder="Message affiché aux membres…"></textarea></div>
+          <div class="field"><label>Bouton</label><input id="a-btn" placeholder="Voir la saison"></div>
+          <div class="field"><label>Lien bouton</label><input id="a-url" placeholder="saison.html ou https://…"></div>
+        </div>
+        <button class="btn" onclick="saveAnnonce()">Enregistrer l’annonce</button><div id="msg-annonce" class="msg"></div>
+      </div>
+    </section>
+
+    <section class="tab-pane" id="tab-questionnaire">
+      <div class="grid"><div class="card-admin"><div class="mini-title">Options finales</div><div class="list" id="q-list"></div><button class="btn-gold" style="margin-top:.8rem" onclick="newQuestionnaire()">+ Ajouter</button></div>
+      <div class="card-admin"><div class="mini-title">Éditer une option</div><input type="hidden" id="q-key"><div class="form-grid">
+        <div class="field"><label>Type</label><select id="q-type"><option value="adhesion">Adhésion</option><option value="event">Événement</option><option value="goodie">Goodies</option><option value="renew">Renouvellement</option></select></div>
+        <div class="field"><label>Ordre</label><input id="q-order" type="number" value="10"></div>
+        <div class="field"><label>Icône</label><input id="q-icon" placeholder="🎭"></div>
+        <div class="field"><label>Actif</label><select id="q-active"><option value="true">Oui</option><option value="false">Non</option></select></div>
+        <div class="field full"><label>Titre</label><input id="q-title" placeholder="Inscription théâtre"></div>
+        <div class="field full"><label>Description</label><textarea id="q-desc"></textarea></div>
+        <div class="field full"><label>Lien final</label><input id="q-link" placeholder="https://helloasso.com/…"></div>
+        <div class="field"><label>Détail 1 — clé</label><input id="q-d1k" placeholder="Âge"></div><div class="field"><label>Détail 1 — valeur</label><input id="q-d1v" placeholder="7/9 ans"></div>
+        <div class="field"><label>Détail 2 — clé</label><input id="q-d2k" placeholder="Jour"></div><div class="field"><label>Détail 2 — valeur</label><input id="q-d2v" placeholder="Mercredi"></div>
+        <div class="field full"><label>Titre destination</label><input id="q-dtitle"></div><div class="field full"><label>Description destination</label><textarea id="q-ddesc"></textarea></div>
+      </div><div class="row-actions"><button class="btn btn-sm" onclick="saveQuestionnaire()">Enregistrer</button><button class="btn-outline danger" onclick="deleteQuestionnaire()">Supprimer</button></div><div class="hint">Ces données remplacent le CSV du questionnaire d’accueil.</div><div id="msg-q" class="msg"></div></div></div>
+    </section>
+
+    <section class="tab-pane" id="tab-ressources">
+      <div class="grid"><div class="card-admin"><div class="mini-title">Documents</div><div class="list" id="r-list"></div><button class="btn-gold" style="margin-top:.8rem" onclick="newResource()">+ Ajouter</button></div>
+      <div class="card-admin"><div class="mini-title">Éditer une ressource</div><input type="hidden" id="r-key"><div class="form-grid">
+        <div class="field"><label>Catégorie</label><select id="r-cat" onchange="updateResourceSubcats()"></select></div>
+        <div class="field"><label>Sous-catégorie</label><select id="r-subcat"></select></div>
+        <div class="field"><label>Type</label><select id="r-type"><option value="pdf">PDF</option><option value="mp3">Audio</option><option value="video">Vidéo</option><option value="image">Image</option><option value="texte">Texte</option><option value="doc">Autre lien</option></select></div>
+        <div class="field"><label>Actif</label><select id="r-active"><option value="true">Oui</option><option value="false">Non</option></select></div>
+        <div class="field full"><label>Nom</label><input id="r-name"></div>
+        <div class="field full"><label>Contenu ou lien</label><textarea id="r-url" placeholder="https://drive.google.com/... ou texte"></textarea></div>
+      </div><div class="row-actions"><button class="btn btn-sm" onclick="saveResource()">Enregistrer</button><button class="btn-outline danger" onclick="deleteResource()">Supprimer</button></div><div class="hint">Ces ressources remplacent le CSV Categorie / Sous-categorie / Nom / Contenu ou lien / Type.</div><div id="msg-r" class="msg"></div></div></div>
+    </section>
+  </div>
+</div>
+<script src="assets/js/fts-utils.js"></script>
+<script src="assets/js/fts-firebase.js"></script>
+<script>
+let db, auth, questionnaire=[], resources=[];
+function msg(id, txt, ok=true){const el=document.getElementById(id); el.textContent=txt; el.className='msg '+(ok?'ok':'err'); setTimeout(()=>el.className='msg',2500)}
+function showTab(id,btn){document.querySelectorAll('.tab-lnk').forEach(b=>b.classList.remove('active'));btn.classList.add('active');document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));document.getElementById('tab-'+id).classList.add('active')}
+function doLogout(){firebase.auth().signOut().then(()=>location.href='auth.html')}
+function init(){db=FTS.initFirebase();auth=firebase.auth();auth.onAuthStateChanged(async user=>{if(!user){location.href='auth.html';return}const snap=await db.ref('fts_users/'+user.uid).once('value');const p=snap.val();if(!p||p.role!=='admin'){location.href='membres.html';return}document.getElementById('auth-loading').style.display='none';document.getElementById('admin-shell').style.display='block';fillCats();await loadAnnonce();listenQuestionnaire();listenResources();})}
+async function loadAnnonce(){const s=await db.ref('fts_content/annonces/current').once('value');const a=s.val()||{};document.getElementById('a-active').value=String(a.active!==false);document.getElementById('a-title').value=a.title||'';document.getElementById('a-body').value=a.body||a.text||'';document.getElementById('a-btn').value=a.buttonText||'';document.getElementById('a-url').value=a.buttonUrl||''}
+async function saveAnnonce(){await db.ref('fts_content/annonces/current').set({active:document.getElementById('a-active').value==='true',title:document.getElementById('a-title').value.trim(),body:document.getElementById('a-body').value.trim(),buttonText:document.getElementById('a-btn').value.trim(),buttonUrl:document.getElementById('a-url').value.trim(),updatedAt:Date.now()});msg('msg-annonce','Annonce enregistrée')}
+function listenQuestionnaire(){db.ref('fts_content/questionnaire/options').orderByChild('order').on('value',s=>{questionnaire=[];if(s.exists())s.forEach(c=>questionnaire.push({key:c.key,...c.val()}));renderQList();if(!document.getElementById('q-key').value)newQuestionnaire()})}
+function renderQList(){const el=document.getElementById('q-list');el.innerHTML=questionnaire.length?questionnaire.map(q=>`<div class="item" onclick="editQuestionnaire('${q.key}')"><div class="item-title">${FTS.esc(q.icon||'')} ${FTS.esc(q.title||q.titre||'Sans titre')}</div><div class="item-meta">${FTS.esc(q.type||'')} · ordre ${q.order||0}${q.active===false?' · masqué':''}</div></div>`).join(''):'<div class="hint">Aucune option.</div>'}
+function newQuestionnaire(){['q-key','q-title','q-desc','q-link','q-d1k','q-d1v','q-d2k','q-d2v','q-dtitle','q-ddesc'].forEach(id=>document.getElementById(id).value='');document.getElementById('q-type').value='adhesion';document.getElementById('q-icon').value='🎭';document.getElementById('q-order').value=(questionnaire.length+1)*10;document.getElementById('q-active').value='true'}
+function editQuestionnaire(key){const q=questionnaire.find(x=>x.key===key);if(!q)return;document.getElementById('q-key').value=key;document.getElementById('q-type').value=q.type||'adhesion';document.getElementById('q-order').value=q.order||10;document.getElementById('q-icon').value=q.icon||'';document.getElementById('q-active').value=String(q.active!==false);document.getElementById('q-title').value=q.title||q.titre||'';document.getElementById('q-desc').value=q.description||'';document.getElementById('q-link').value=q.link||q.lien||'';const ds=q.details||[];document.getElementById('q-d1k').value=ds[0]?.key||'';document.getElementById('q-d1v').value=ds[0]?.value||'';document.getElementById('q-d2k').value=ds[1]?.key||'';document.getElementById('q-d2v').value=ds[1]?.value||'';document.getElementById('q-dtitle').value=q.destTitle||q.dest_titre||'';document.getElementById('q-ddesc').value=q.destDesc||q.dest_desc||''}
+async function saveQuestionnaire(){const key=document.getElementById('q-key').value;const details=[];[['q-d1k','q-d1v'],['q-d2k','q-d2v']].forEach(([k,v])=>{const key=document.getElementById(k).value.trim(), val=document.getElementById(v).value.trim(); if(key&&val)details.push({key,value:val})});const data={type:document.getElementById('q-type').value,order:Number(document.getElementById('q-order').value||0),icon:document.getElementById('q-icon').value.trim(),active:document.getElementById('q-active').value==='true',title:document.getElementById('q-title').value.trim(),description:document.getElementById('q-desc').value.trim(),link:document.getElementById('q-link').value.trim(),destTitle:document.getElementById('q-dtitle').value.trim(),destDesc:document.getElementById('q-ddesc').value.trim(),details,updatedAt:Date.now()};if(!data.title){msg('msg-q','Titre requis',false);return}const ref=key?db.ref('fts_content/questionnaire/options/'+key):db.ref('fts_content/questionnaire/options').push();await ref.update(data);document.getElementById('q-key').value=ref.key;msg('msg-q','Option enregistrée')}
+async function deleteQuestionnaire(){const key=document.getElementById('q-key').value;if(!key||!confirm('Supprimer cette option ?'))return;await db.ref('fts_content/questionnaire/options/'+key).remove();newQuestionnaire();msg('msg-q','Option supprimée')}
+function fillCats(){const sel=document.getElementById('r-cat');sel.innerHTML=(FTS.CATEGORIES||[]).map(c=>`<option value="${FTS.esc(c.name)}">${c.icon} ${FTS.esc(c.name)}</option>`).join('');updateResourceSubcats()}
+function updateResourceSubcats(){const cat=(FTS.CATEGORIES||[]).find(c=>c.name===document.getElementById('r-cat').value);document.getElementById('r-subcat').innerHTML='<option value="">-- Aucune --</option>'+((cat?.subcats||[]).map(s=>`<option value="${FTS.esc(s)}">${FTS.esc(s)}</option>`).join(''))}
+function listenResources(){db.ref('fts_ressources').orderByChild('createdAt').on('value',s=>{resources=[];if(s.exists())s.forEach(c=>resources.push({key:c.key,...c.val()}));resources.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));renderRList();if(!document.getElementById('r-key').value)newResource()})}
+function renderRList(){const el=document.getElementById('r-list');el.innerHTML=resources.length?resources.map(r=>`<div class="item" onclick="editResource('${r.key}')"><div class="item-title">${FTS.esc(r.name||'Sans titre')}</div><div class="item-meta">${FTS.esc(r.cat||'')} ${r.subcat?'· '+FTS.esc(r.subcat):''} · ${FTS.esc(r.type||'doc')}${r.active===false?' · masqué':''}</div></div>`).join(''):'<div class="hint">Aucune ressource.</div>'}
+function newResource(){['r-key','r-name','r-url'].forEach(id=>document.getElementById(id).value='');document.getElementById('r-type').value='pdf';document.getElementById('r-active').value='true';fillCats()}
+function editResource(key){const r=resources.find(x=>x.key===key);if(!r)return;document.getElementById('r-key').value=key;document.getElementById('r-cat').value=r.cat||'';updateResourceSubcats();document.getElementById('r-subcat').value=r.subcat||'';document.getElementById('r-type').value=r.type||'doc';document.getElementById('r-active').value=String(r.active!==false);document.getElementById('r-name').value=r.name||'';document.getElementById('r-url').value=r.url||r.text||''}
+async function saveResource(){const key=document.getElementById('r-key').value;const data={cat:document.getElementById('r-cat').value,subcat:document.getElementById('r-subcat').value,type:document.getElementById('r-type').value,active:document.getElementById('r-active').value==='true',name:document.getElementById('r-name').value.trim(),url:document.getElementById('r-url').value.trim(),updatedAt:Date.now()};if(!data.cat||!data.name){msg('msg-r','Catégorie et nom requis',false);return}if(!key)data.createdAt=Date.now();const ref=key?db.ref('fts_ressources/'+key):db.ref('fts_ressources').push();await ref.update(data);document.getElementById('r-key').value=ref.key;msg('msg-r','Ressource enregistrée')}
+async function deleteResource(){const key=document.getElementById('r-key').value;if(!key||!confirm('Supprimer cette ressource ?'))return;await db.ref('fts_ressources/'+key).remove();newResource();msg('msg-r','Ressource supprimée')}
+init();
+</script>
+</body>
+</html>

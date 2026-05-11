@@ -866,7 +866,7 @@ async function showCat(i) {
   await loadDocs(cat.name, i);
 }
 
-/* ── CHARGEMENT DOCUMENTS (Firebase + Sheets) ────────────────── */
+/* ── CHARGEMENT DOCUMENTS (Firebase) ─────────────────────────── */
 async function loadDocs(name, idx) {
   const el = document.getElementById('dc-' + idx);
   if (!el) return;
@@ -879,6 +879,7 @@ async function loadDocs(name, idx) {
     if (snap.exists()) {
       snap.forEach(child => {
         const d = child.val();
+        if (d.active === false) return;
         rows.push({
           cat:  d.cat,
           sub:  d.subcat || '',
@@ -891,21 +892,6 @@ async function loadDocs(name, idx) {
       });
     }
   } catch(e) {}
-
-  // Source 2 : Google Sheets (docs existants/legacy)
-  if (FTS.SHEETS.ressources) {
-    try {
-      const res  = await FTS.fetch(FTS.SHEETS.ressources);
-      const sheetRows = FTS.parseCSVRaw(await res.text())
-        .map(c => ({
-          cat:  c[0], sub: c[1], name: c[2],
-          url:  c[3], type: (c[4] || 'doc').toLowerCase().trim(),
-          key:  null, ts: 0,
-        }))
-        .filter(x => x.cat && x.name && x.cat.toLowerCase() === name.toLowerCase());
-      rows = rows.concat(sheetRows);
-    } catch(e) {}
-  }
 
   // Dédoublonnage par nom + élimination doublons Sheets/Firebase
   const seen = new Set();
@@ -989,18 +975,25 @@ document.getElementById('mo').addEventListener('click', function(e) {
 
 /* ── ANNONCE DYNAMIQUE ───────────────────────────────────────── */
 async function loadAnnonce() {
-  const el  = document.getElementById('annonce-dyn');
-  const url = FTS.SHEETS.annonces;
-  if (!el || !url) return;
+  const el = document.getElementById('annonce-dyn');
+  if (!el) return;
 
   try {
-    const res   = await FTS.fetch(url);
-    const rows  = FTS.parseCSVRaw(await res.text());
-    const lines = rows.map(c => c[0] || '').filter(Boolean);
-    if (lines.length) {
-      el.innerHTML     = lines.map(FTS.esc).join('<br>');
-      el.style.display = '';
-    }
+    const snap = await db.ref('fts_content/annonces/current').once('value');
+    const a = snap.val();
+    const now = Date.now();
+    if (!a || a.active === false) return;
+    if (a.startAt && now < Number(a.startAt)) return;
+    if (a.endAt && now > Number(a.endAt)) return;
+
+    const body = a.body || a.text || '';
+    if (!body.trim()) return;
+    const title = a.title ? `<strong>${FTS.esc(a.title)}</strong><br>` : '';
+    const button = a.buttonText && a.buttonUrl
+      ? `<br><a class="evt-link" href="${FTS.esc(a.buttonUrl)}">${FTS.esc(a.buttonText)}</a>`
+      : '';
+    el.innerHTML = title + FTS.esc(body).replace(/\n/g, '<br>') + button;
+    el.style.display = '';
   } catch(e) {
     // Annonce optionnelle — ignoré silencieusement
   }

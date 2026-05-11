@@ -271,8 +271,13 @@ html, body { height: 100%; }
 
 </div>
 
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
 <!-- Utilitaires partagés -->
 <script src="assets/js/fts-utils.js"></script>
+<script src="assets/js/fts-firebase.js"></script>
 
 <script>
 /* ── CONFIG ─────────────────────────────────────────────────────
@@ -313,30 +318,27 @@ const CFG = {
 const state = { step1: null, step2: null, step3: null };
 let step3Options = {};
 
-/* ── CHARGEMENT SHEET ────────────────────────────────────────── */
-async function loadSheet() {
+/* ── CHARGEMENT QUESTIONNAIRE FIREBASE ─────────────────────── */
+async function loadQuestionnaire() {
   try {
-    // URL définie dans fts-firebase.js → FTS.SHEETS.inscriptions
-    // Fallback inline si le fichier n'est pas chargé
-    const url = (window.FTS && FTS.SHEETS)
-      ? FTS.SHEETS.inscriptions
-      : "https://docs.google.com/spreadsheets/d/e/2PACX-1vS27ZR5nQD9snZ3mNaeIxOjxyHlpWEnhKl7APAY4OZsSOiIxqyrNQ6ENLWl_A-evRtoqVxy62QUm1in/pub?gid=627892990&single=true&output=csv";
-
-    const res  = await FTS.fetch(url, 8000);
-    const text = await res.text();
-    const rows = FTS.parseCSV(text);
-    step3Options = buildStep3Options(rows);
+    const db = FTS.initFirebase();
+    const snap = await db.ref('fts_content/questionnaire/options').orderByChild('order').once('value');
+    const rows = [];
+    if (snap.exists()) snap.forEach(child => rows.push({ id: child.key, ...child.val() }));
+    step3Options = buildStep3Options(rows.filter(r => r.active !== false));
   } catch (e) {
-    console.warn('[FTS] Impossible de charger le sheet :', e);
+    console.warn('[FTS] Impossible de charger le questionnaire Firebase :', e);
+    step3Options = {};
   }
   initPage();
 }
 
 function buildStep3Options(rows) {
   const result = {};
-  rows.forEach(row => {
-    const type = row['type'] ? row['type'].toLowerCase() : '';
-    if (!type || !row['titre']) return;
+  rows.forEach((row, index) => {
+    const type = String(row.type || '').toLowerCase().trim();
+    const title = row.title || row.titre || '';
+    if (!type || !title) return;
 
     if (!result[type]) {
       const q3 = CFG.step3Questions[type] || { q: 'Choisis une option', d: '' };
@@ -344,20 +346,31 @@ function buildStep3Options(rows) {
     }
 
     const detail = [];
-    if (row['detail1_cle'] && row['detail1_valeur']) detail.push([row['detail1_cle'], row['detail1_valeur']]);
-    if (row['detail2_cle'] && row['detail2_valeur']) detail.push([row['detail2_cle'], row['detail2_valeur']]);
+    if (Array.isArray(row.details)) {
+      row.details.forEach(d => { if (d && d.key && d.value) detail.push([d.key, d.value]); });
+    } else {
+      const d1k = row.detail1_cle || row.detail1Key;
+      const d1v = row.detail1_valeur || row.detail1Value;
+      const d2k = row.detail2_cle || row.detail2Key;
+      const d2v = row.detail2_valeur || row.detail2Value;
+      if (d1k && d1v) detail.push([d1k, d1v]);
+      if (d2k && d2v) detail.push([d2k, d2v]);
+    }
 
     result[type].options.push({
-      id:        type + '_' + result[type].options.length,
-      icon:      row['icon']        || '🎭',
-      title:     row['titre']       || '',
-      desc:      row['description'] || '',
+      id:        row.id || (type + '_' + index),
+      icon:      row.icon || '🎭',
+      title:     title,
+      desc:      row.description || row.desc || '',
       detail,
-      link:      row['lien']        || '#',
-      destTitle: row['dest_titre']  || row['titre'] || '',
-      destDesc:  row['dest_desc']   || row['description'] || '',
+      link:      row.link || row.lien || '#',
+      destTitle: row.destTitle || row.dest_titre || title,
+      destDesc:  row.destDesc || row.dest_desc || row.description || '',
+      order:     Number(row.order || index),
     });
   });
+
+  Object.values(result).forEach(group => group.options.sort((a, b) => a.order - b.order));
   return result;
 }
 
@@ -508,7 +521,7 @@ function restart() {
 }
 
 /* ── START ───────────────────────────────────────────────────── */
-loadSheet();
+loadQuestionnaire();
 </script>
 
 <!-- PWA partagé -->
