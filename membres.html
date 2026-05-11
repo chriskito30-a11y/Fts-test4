@@ -849,36 +849,36 @@ function applyDisciplineFilter(profile) {
 async function loadEvts() {
   const el = document.getElementById('evts');
   try {
+    const snap = await db.ref('fts_events').once('value');
     const rows = [];
+    const now = Date.now();
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
 
-    // Source unique V1 : Firebase RTDB.
-    // Formats acceptés : fts_events/{id} ou fts_content/calendrier/{id}
-    const snaps = await Promise.all([
-      db.ref('fts_events').once('value').catch(() => null),
-      db.ref('fts_content/calendrier').once('value').catch(() => null)
-    ]);
-
-    snaps.forEach(snap => {
-      if (!snap || !snap.exists()) return;
+    if (snap.exists()) {
       snap.forEach(child => {
         const v = child.val() || {};
         if (v.active === false || v.status === 'inactive') return;
+
+        const ts = Number(v.dateTs || v.startTs || v.ts || 0);
         rows.push({
-          n: v.n || v.name || v.nom || v.title || v.titre || '',
-          t: v.t || v.type || '',
-          d: v.d || v.date || '',
-          h: v.h || v.heure || v.time || '',
-          l: v.l || v.location || v.lieu || '',
-          u: v.u || v.url || v.link || v.lien || '',
-          ts: Number(v.ts || v.dateTs || v.startTs || v.order || 0)
+          id: child.key,
+          n: v.name || v.nom || v.title || v.titre || v.n || '',
+          t: v.type || v.t || '',
+          d: v.dateLabel || v.date || v.d || '',
+          h: v.hour || v.heure || v.time || v.h || '',
+          l: v.location || v.lieu || v.l || '',
+          u: v.url || v.link || v.lien || v.u || '',
+          ts
         });
       });
-    });
+    }
 
     allEvts = rows
       .filter(x => x.n && (x.d || x.ts))
+      .filter(x => !x.ts || x.ts >= startOfToday.getTime())
       .sort((a,b) => {
-        if (a.ts || b.ts) return (a.ts || 0) - (b.ts || 0);
+        if (a.ts || b.ts) return (a.ts || Number.MAX_SAFE_INTEGER) - (b.ts || Number.MAX_SAFE_INTEGER);
         return String(a.d).localeCompare(String(b.d), 'fr');
       });
 

@@ -102,7 +102,7 @@ window.addEventListener("orientationchange", () => setTimeout(setH, 200));
    ================================================================ */
 
 let db, auth, uid, userProfile, userData;
-let csvStructure = [], csvLoaded = false;
+let categoryStructure = [], categoryLoaded = false;
 let forumItems = [];
 let openCats = {};
 let currentChannel = null, currentListener = null, lastMsgDate = null;
@@ -114,21 +114,11 @@ function storageGet(k){ return localStorage.getItem(k); }
 function storageSet(k,v){ localStorage.setItem(k,v); }
 function catIcon(s){ return FTS.catIcon(s); }
 
-function parseCSVLine(line){
-  const result=[]; let current='', inQuotes=false;
-  for(let i=0;i<line.length;i++){
-    const c=line[i];
-    if(c==='"'){ inQuotes=!inQuotes; continue; }
-    if(c===',' && !inQuotes){ result.push(current.trim()); current=''; continue; }
-    current+=c;
-  }
-  result.push(current.trim()); return result;
-}
 
 window.addEventListener('DOMContentLoaded', async () => {
   if('serviceWorker' in navigator){ navigator.serviceWorker.register('./sw.js', {scope:'./'}).catch(()=>{}); }
   db = FTS.initFirebase(); auth = firebase.auth();
-  loadCSV();
+  loadCategoryStructure();
   auth.onAuthStateChanged(async user => {
     if(!user){ location.href='auth.html'; return; }
     uid = user.uid;
@@ -182,11 +172,11 @@ function updateStatusUI(){
   document.getElementById('pending-bar').classList.toggle('show', userData?.status === 'pending' && userProfile?.role !== 'admin');
 }
 
-async function loadCSV(){
+async function loadCategoryStructure(){
   try{
-    csvStructure = FTS.getCategoryStructureAsync ? await FTS.getCategoryStructureAsync(db) : (FTS.getCategoryStructure ? FTS.getCategoryStructure() : []);
-  }catch(e){ console.warn('[FTS Forum] Structure catégories', e); csvStructure = []; }
-  csvLoaded = true;
+    categoryStructure = FTS.getCategoryStructureAsync ? await FTS.getCategoryStructureAsync(db) : (FTS.getCategoryStructure ? FTS.getCategoryStructure() : []);
+  }catch(e){ console.warn('[FTS Forum] Structure catégories Firebase', e); categoryStructure = []; }
+  categoryLoaded = true;
   buildForumItems(); renderForumList(document.getElementById('forum-search')?.value || '');
 }
 
@@ -200,8 +190,8 @@ function buildForumItems(){
     id:'general', type:'channel', icon:'💬', name:'Général', desc:'Discussion ouverte à tous', preview:'Canal commun à tous les membres'
   }];
   if(isActive){
-    if(csvStructure.length){
-      for(const cat of csvStructure){
+    if(categoryStructure.length){
+      for(const cat of categoryStructure){
         const catNorm = norm(cat.category);
         const userHasCat = isAdmin || userGroupNorms?.includes(catNorm);
         const visibleSubs = isAdmin ? cat.subs : cat.subs.filter(s => userSubNorms?.includes(norm(s.name)));
@@ -211,7 +201,7 @@ function buildForumItems(){
         visibleSubs.forEach(sub => channels.push({ id:norm(sub.name), icon:'📅', name:sub.name, desc:'Canal '+sub.name }));
         items.push({ id:'cat_'+catNorm, type:'category', icon:catIcon(cat.category), name:cat.category, desc:`${channels.length} canal${channels.length>1?'s':''} accessible${channels.length>1?'s':''}`, channels });
       }
-    }else if(!csvLoaded){
+    }else if(!categoryLoaded){
       items.push({ id:'loading', type:'info', icon:'⏳', name:'Chargement…', desc:'Chargement des catégories' });
     }else{
       const groups = (userData?.group || '').split(', ').filter(Boolean);
