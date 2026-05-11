@@ -222,3 +222,24 @@ FTS.uploadCloudinary = function(file, onProgress) {
 FTS.scrollBottom = function(el) {
   if (el) el.scrollTop = el.scrollHeight;
 };
+
+
+/* ── CATALOGUE DISCIPLINES PARTAGÉ ────────────────────────────── */
+FTS.CATEGORIES = [
+  { icon:"🎭", name:"Theatre",          subcats:["7/9 ans","10/12 ans","13/15 ans","Impro","10/17 ans - Lundi","Adultes - Lundi","Adultes - Vendredi"] },
+  { icon:"🎤", name:"Chant",            subcats:[] },
+  { icon:"💃", name:"Danse",            subcats:["Les Baby Show","Show Danse Junior","Ados / Adultes"] },
+  { icon:"🎸", name:"Musique",          subcats:["Guitare","Basse","Batterie","Piano","Formation Musicale"] },
+  { icon:"⭐", name:"Singer Academy",   subcats:["Loisir","Spectacle"] },
+  { icon:"🎬", name:"Comedie Musicale", subcats:["Kids","Enfants","Adultes"] },
+  { icon:"🌟", name:"Singer Show",      subcats:[] },
+  { icon:"🎨", name:"Atelier",          subcats:[] },
+];
+
+FTS.getCategoryStructure = function() {
+  return (FTS.CATEGORIES || []).map(c => ({
+    category: c.name,
+    icon: c.icon,
+    subs: (c.subcats || []).map(name => ({ name }))
+  }));
+};
