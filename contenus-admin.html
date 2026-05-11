@@ -150,12 +150,63 @@ function editCategory(key){const c=categoriesRaw.find(x=>x.key===key);if(!c)retu
 async function saveCategory(){const oldKey=document.getElementById('c-key').value;const name=document.getElementById('c-name').value.trim();if(!name){msg('msg-c','Nom requis',false);return}const key=FTS.norm(name);const lines=document.getElementById('c-subcats').value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);const subcats={};lines.forEach(x=>subcats[FTS.norm(x)]={name:x,active:true,updatedAt:Date.now()});const data={name,icon:document.getElementById('c-icon').value.trim()||FTS.catIcon(name),order:Number(document.getElementById('c-order').value||999),active:document.getElementById('c-active').value==='true',subcats,updatedAt:Date.now()};if(!oldKey)data.createdAt=Date.now();const updates={};updates['fts_content/categories/'+key]=data;if(oldKey&&oldKey!==key)updates['fts_content/categories/'+oldKey]=null;await db.ref().update(updates);await syncResourcesCategoryRename(oldKey,key,name);await refreshCats();document.getElementById('c-key').value=key;msg('msg-c','Catégorie enregistrée')}
 async function syncResourcesCategoryRename(oldKey,newKey,newName){if(!oldKey||oldKey===newKey)return;const snap=await db.ref('fts_ressources').once('value');const updates={};if(snap.exists())snap.forEach(ch=>{const r=ch.val()||{};const cat=r.cat||r.category;if(FTS.norm(cat)===oldKey){updates['fts_ressources/'+ch.key+'/cat']=newName;updates['fts_ressources/'+ch.key+'/category']=newName;updates['fts_ressources/'+ch.key+'/updatedAt']=Date.now();}});if(Object.keys(updates).length)await db.ref().update(updates)}
 async function deleteCategory(){const key=document.getElementById('c-key').value;const name=document.getElementById('c-name').value.trim();if(!key||!name){msg('msg-c','Sélectionne une catégorie à supprimer',false);return}if(!confirm('Supprimer définitivement cette catégorie ET toutes les ressources liées dans Firebase ?'))return;const snap=await db.ref('fts_ressources').once('value');const updates={};updates['fts_content/categories/'+key]=null;if(snap.exists())snap.forEach(ch=>{const r=ch.val()||{};const cat=r.cat||r.category;if(FTS.norm(cat)===key)updates['fts_ressources/'+ch.key]=null;});await db.ref().update(updates);newCategory();await refreshCats();msg('msg-c','Catégorie et ressources liées supprimées')}
-function listenResources(){db.ref('fts_ressources').on('value',snap=>{resources=[];if(snap.exists())snap.forEach(c=>resources.push({key:c.key,...c.val()}));resources.sort((a,b)=>(b.createdAt||b.updatedAt||0)-(a.createdAt||a.updatedAt||0));renderRList();if(!document.getElementById('r-key').value)newResource()},err=>{console.warn('[FTS Admin contenus] Ressources PERMISSION_DENIED ou erreur',err);msg('msg-r','Impossible de charger les ressources : '+(err&&err.message?err.message:err),false)})}
-function renderRList(){const el=document.getElementById('r-list');el.innerHTML=resources.length?resources.map(r=>{const cat=r.cat||r.category||'';const sub=r.subcat||r.subcategory||'';return `<div class="item" onclick="editResource('${r.key}')"><div class="item-title">${FTS.esc(r.name||r.title||'Sans titre')}</div><div class="item-meta">${FTS.esc(cat)} ${sub?'· '+FTS.esc(sub):''} · ${FTS.esc(r.type||'doc')}${(r.active===false||r.status==='inactive')?' · masqué':''}</div></div>`}).join(''):'<div class="hint">Aucune ressource.</div>'}
-function newResource(){['r-key','r-name','r-url','r-cat-new','r-subcat-new'].forEach(id=>document.getElementById(id).value='');document.getElementById('r-type').value='pdf';document.getElementById('r-active').value='true';fillCats()}
-function editResource(key){const r=resources.find(x=>x.key===key);if(!r)return;document.getElementById('r-key').value=key;document.getElementById('r-cat-new').value='';document.getElementById('r-subcat-new').value='';document.getElementById('r-cat').value=r.cat||r.category||'';updateResourceSubcats();document.getElementById('r-subcat').value=r.subcat||r.subcategory||'';document.getElementById('r-type').value=r.type||'doc';document.getElementById('r-active').value=String(r.active!==false && r.status!=='inactive');document.getElementById('r-name').value=r.name||'';document.getElementById('r-url').value=r.url||r.content||r.text||''}
-async function saveResource(){const key=document.getElementById('r-key').value;const cat=(document.getElementById('r-cat-new').value.trim()||document.getElementById('r-cat').value);const subcat=(document.getElementById('r-subcat-new').value.trim()||document.getElementById('r-subcat').value);const active=document.getElementById('r-active').value==='true';const content=document.getElementById('r-url').value.trim();const data={cat,category:cat,subcat,subcategory:subcat,type:document.getElementById('r-type').value,active,status:active?'active':'inactive',visibility:'members',name:document.getElementById('r-name').value.trim(),url:content,content,updatedAt:Date.now()};if(!data.cat||!data.name){msg('msg-r','Catégorie et nom requis',false);return}if(!key)data.createdAt=Date.now();const ref=key?db.ref('fts_ressources/'+key):db.ref('fts_ressources').push();await ref.update(data);await FTS.ensureResourceCategory(db,data);document.getElementById('r-key').value=ref.key;await refreshCats();msg('msg-r','Ressource enregistrée')}
-async function deleteResource(){const key=document.getElementById('r-key').value;if(!key||!confirm('Supprimer cette ressource ?'))return;await db.ref('fts_ressources/'+key).remove();newResource();msg('msg-r','Ressource supprimée')}
+function normalizeResource(r,key){
+  r=r||{};
+  const cat=r.cat||r.category||r.categorie||'';
+  const subcat=r.subcat||r.subcategory||r.sousCategorie||r['Sous-categorie']||'';
+  const name=r.name||r.nom||r.titre||r.title||'Sans titre';
+  const content=r.content||r.url||r.link||r.text||'';
+  return {...r,key,cat,category:cat,subcat,subcategory:subcat,name,content,url:content,type:r.type||'doc',active:r.active!==false&&r.status!=='inactive'};
+}
+async function loadResourcesOnce(){
+  const snap=await db.ref('fts_ressources').once('value');
+  resources=[];
+  if(snap.exists())snap.forEach(c=>resources.push(normalizeResource(c.val(),c.key)));
+  resources.sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0));
+  renderRList();
+  return resources;
+}
+function listenResources(){
+  db.ref('fts_ressources').on('value',s=>{
+    resources=[];
+    if(s.exists())s.forEach(c=>resources.push(normalizeResource(c.val(),c.key)));
+    resources.sort((a,b)=>(b.updatedAt||b.createdAt||0)-(a.updatedAt||a.createdAt||0));
+    renderRList();
+    if(!document.getElementById('r-key').value)newResource();
+  },err=>{console.warn('[FTS Contenus] ressources',err);renderRList();});
+}
+function renderRList(){
+  const el=document.getElementById('r-list'); if(!el)return;
+  el.innerHTML=resources.length?resources.map(r=>`<div class="item${document.getElementById('r-key')?.value===r.key?' sel':''}" onclick="editResource('${r.key}')"><div class="item-title">${FTS.esc(r.name||'Sans titre')}</div><div class="item-meta">${FTS.esc(r.cat||r.category||'Sans catégorie')} ${r.subcat?'· '+FTS.esc(r.subcat):''} · ${FTS.esc(r.type||'doc')}${r.active===false||r.status==='inactive'?' · masqué':''}</div></div>`).join(''):'<div class="hint">Aucune ressource.</div>';
+}
+function newResource(){['r-key','r-name','r-url','r-cat-new','r-subcat-new'].forEach(id=>document.getElementById(id).value='');document.getElementById('r-type').value='pdf';document.getElementById('r-active').value='true';fillCats();renderRList()}
+function editResource(key){const r=resources.find(x=>x.key===key);if(!r)return;document.getElementById('r-key').value=key;document.getElementById('r-cat-new').value='';document.getElementById('r-subcat-new').value='';document.getElementById('r-cat').value=r.cat||r.category||'';updateResourceSubcats();document.getElementById('r-subcat').value=r.subcat||r.subcategory||'';document.getElementById('r-type').value=r.type||'doc';document.getElementById('r-active').value=String(r.active!==false && r.status!=='inactive');document.getElementById('r-name').value=r.name||'';document.getElementById('r-url').value=r.url||r.content||r.text||'';renderRList()}
+async function saveResource(){
+  const key=document.getElementById('r-key').value;
+  const cat=(document.getElementById('r-cat-new').value.trim()||document.getElementById('r-cat').value);
+  const subcat=(document.getElementById('r-subcat-new').value.trim()||document.getElementById('r-subcat').value);
+  const active=document.getElementById('r-active').value==='true';
+  const content=document.getElementById('r-url').value.trim();
+  const now=Date.now();
+  const data={cat,category:cat,subcat,subcategory:subcat,type:document.getElementById('r-type').value,active,status:active?'active':'inactive',visibility:'members',name:document.getElementById('r-name').value.trim(),url:content,content,updatedAt:now};
+  if(!data.cat||!data.name){msg('msg-r','Catégorie et nom requis',false);return}
+  if(!key)data.createdAt=now;
+  const ref=key?db.ref('fts_ressources/'+key):db.ref('fts_ressources').push();
+  await ref.update(data);
+  await FTS.ensureResourceCategory(db,data);
+  document.getElementById('r-key').value=ref.key;
+  await refreshCats();
+  await loadResourcesOnce();
+  editResource(ref.key);
+  msg('msg-r','Ressource enregistrée et affichée dans la liste')
+}
+async function deleteResource(){
+  const key=document.getElementById('r-key').value;if(!key||!confirm('Supprimer cette ressource dans Firebase ?'))return;
+  await db.ref('fts_ressources/'+key).remove();
+  newResource();
+  await loadResourcesOnce();
+  msg('msg-r','Ressource supprimée')
+}
 init();
 </script>
 </body>
