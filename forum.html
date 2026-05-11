@@ -184,20 +184,8 @@ function updateStatusUI(){
 
 async function loadCSV(){
   try{
-    const resp = await FTS.fetch(FTS.SHEETS.ressources + '&_t=' + Date.now());
-    const text = await resp.text();
-    const lines = text.trim().split(/\r?\n/);
-    const map = new Map();
-    for(let i=1;i<lines.length;i++){
-      const cols = parseCSVLine(lines[i]);
-      const cat = (cols[0]||'').trim();
-      const sub = (cols[1]||'').trim();
-      if(!cat) continue;
-      if(!map.has(cat)) map.set(cat, { category:cat, subs:[] });
-      if(sub && !map.get(cat).subs.some(s => norm(s.name) === norm(sub))) map.get(cat).subs.push({ name:sub });
-    }
-    csvStructure = Array.from(map.values());
-  }catch(e){ console.warn('[FTS Forum] CSV', e); csvStructure = []; }
+    csvStructure = FTS.getCategoryStructure ? FTS.getCategoryStructure() : [];
+  }catch(e){ console.warn('[FTS Forum] Structure catégories', e); csvStructure = []; }
   csvLoaded = true;
   buildForumItems(); renderForumList(document.getElementById('forum-search')?.value || '');
 }
