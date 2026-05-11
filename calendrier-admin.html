@@ -52,9 +52,9 @@
           <div class="field full"><label>Note interne / description</label><textarea id="e-desc" placeholder="Optionnel — détails utiles pour l’équipe"></textarea></div>
         </div>
         <div class="row-actions">
-          <button class="btn btn-sm" onclick="saveEvent()">Enregistrer</button>
-          <button class="btn-outline" onclick="newEvent()">Nouveau</button>
-          <button class="btn-outline danger" onclick="deleteEvent()">Supprimer</button>
+          <button type="button" class="btn btn-sm" id="btn-save-event">Enregistrer</button>
+          <button type="button" class="btn-outline" id="btn-new-event">Nouveau</button>
+          <button type="button" class="btn-outline danger" id="btn-delete-event">Supprimer</button>
         </div>
         <div id="msg" class="msg"></div>
       </div>
@@ -170,12 +170,37 @@ function dateTs(iso,hour){
   d.setHours(Number(h[0]||0), Number(h[1]||0), 0, 0);
   return d.getTime();
 }
+async function writeEventToFirebase(key, data){
+  const updates = {};
+  // Chemin officiel V1
+  updates['fts_events/' + key] = data;
+  // Miroir de compatibilité : utile si vos règles Firebase autorisent déjà fts_content
+  updates['fts_content/calendrier/events/' + key] = data;
+  try{
+    await db.ref().update(updates);
+    return 'fts_events';
+  }catch(primaryErr){
+    console.warn('[FTS Calendrier] Écriture groupée impossible, tentative compatibilité', primaryErr);
+    // Fallback volontaire : certaines règles existantes peuvent autoriser fts_content mais pas encore fts_events.
+    await db.ref('fts_content/calendrier/events/' + key).set(data);
+    return 'fts_content/calendrier/events';
+  }
+}
+
+function setSaving(isSaving){
+  const btn = $('btn-save-event');
+  if(!btn) return;
+  btn.disabled = !!isSaving;
+  btn.textContent = isSaving ? 'Enregistrement…' : 'Enregistrer';
+}
+
 async function saveEvent(){
+  setSaving(true);
   const name=$('e-name').value.trim();
   const iso=$('e-date').value;
   const hour=$('e-hour').value;
-  if(!name){ msg('Nom requis', false); return; }
-  if(!iso){ msg('Date requise', false); return; }
+  if(!name){ setSaving(false); msg('Nom requis', false); return; }
+  if(!iso){ setSaving(false); msg('Date requise', false); return; }
   const key=$('e-key').value || db.ref('fts_events').push().key;
   const active=$('e-active').value==='true';
   const data={
@@ -201,18 +226,39 @@ async function saveEvent(){
     updatedAt:Date.now()
   };
   if(!$('e-key').value) data.createdAt=Date.now();
-  await db.ref('fts_events/'+key).set(data);
-  selectedKey=key; $('e-key').value=key;
-  msg('Événement enregistré');
+  try{
+    const writtenPath = await writeEventToFirebase(key, data);
+    selectedKey=key; $('e-key').value=key;
+    msg(writtenPath === 'fts_events' ? 'Événement enregistré' : 'Événement enregistré dans le calendrier compatible');
+  }catch(e){
+    console.error('[FTS Calendrier] Enregistrement impossible', e);
+    msg('Enregistrement impossible : ' + (e && e.message ? e.message : String(e)), false);
+  }finally{
+    setSaving(false);
+  }
 }
 async function deleteEvent(){
   const key=$('e-key').value;
   if(!key){ msg('Sélectionne un événement à supprimer', false); return; }
   if(!confirm('Supprimer définitivement cet événement ?')) return;
-  await db.ref('fts_events/'+key).remove();
-  newEvent();
-  msg('Événement supprimé');
+  try{
+    await db.ref().update({
+      ['fts_events/' + key]: null,
+      ['fts_content/calendrier/events/' + key]: null
+    });
+    newEvent();
+    msg('Événement supprimé');
+  }catch(e){
+    console.error('[FTS Calendrier] Suppression impossible', e);
+    msg('Suppression impossible : ' + (e && e.message ? e.message : String(e)), false);
+  }
 }
+
+window.addEventListener('DOMContentLoaded', function(){
+  $('btn-save-event')?.addEventListener('click', function(e){ e.preventDefault(); saveEvent(); });
+  $('btn-new-event')?.addEventListener('click', function(e){ e.preventDefault(); newEvent(); });
+  $('btn-delete-event')?.addEventListener('click', function(e){ e.preventDefault(); deleteEvent(); });
+});
 
 init();
 </script>

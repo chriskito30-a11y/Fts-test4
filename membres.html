@@ -849,16 +849,23 @@ function applyDisciplineFilter(profile) {
 async function loadEvts() {
   const el = document.getElementById('evts');
   try {
-    const snap = await db.ref('fts_events').once('value');
+    const snaps = await Promise.all([
+      db.ref('fts_events').once('value').catch(() => null),
+      db.ref('fts_content/calendrier/events').once('value').catch(() => null)
+    ]);
     const rows = [];
+    const seen = new Set();
     const now = Date.now();
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
 
-    if (snap.exists()) {
+    snaps.forEach(snap => {
+      if (!snap || !snap.exists()) return;
       snap.forEach(child => {
         const v = child.val() || {};
+        if (seen.has(child.key)) return;
         if (v.active === false || v.status === 'inactive') return;
+        seen.add(child.key);
 
         const ts = Number(v.dateTs || v.startTs || v.ts || 0);
         rows.push({
@@ -872,7 +879,7 @@ async function loadEvts() {
           ts
         });
       });
-    }
+    });
 
     allEvts = rows
       .filter(x => x.n && (x.d || x.ts))
