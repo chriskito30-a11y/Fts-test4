@@ -17,6 +17,30 @@ function setH(){ document.documentElement.style.setProperty("--vh", window.inner
 setH(); window.addEventListener("resize", setH);
 window.addEventListener("orientationchange", () => setTimeout(setH, 200));
 </script>
+
+<style>
+/* Actions messages/conversations */
+.btn-chat-del {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 1px solid var(--border); background: transparent; color: var(--muted);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all .2s; flex-shrink: 0;
+}
+.btn-chat-del:hover { border-color: var(--red); color: var(--red); background: rgba(212,32,26,.08); }
+.msg-actions {
+  display: none; gap: .25rem; margin-top: .25rem; padding: 0 .35rem;
+}
+.msg-wrap.own:hover .msg-actions { display: flex; }
+.msg-act {
+  border: 1px solid rgba(255,255,255,.08); background: rgba(255,255,255,.03);
+  color: var(--muted); border-radius: 999px; padding: .15rem .45rem;
+  font-size: .62rem; cursor: pointer; font-family: "DM Sans", sans-serif;
+}
+.msg-act:hover { color: var(--white); border-color: rgba(255,255,255,.22); }
+.msg-act.danger:hover { color: var(--red); border-color: rgba(212,32,26,.45); }
+.msg-edited { font-size: .58rem; color: rgba(245,242,238,.32); margin-left: .25rem; }
+@media (max-width: 720px) { .msg-actions { display: flex; } }
+</style>
 </head>
 </head>
 <body>
@@ -78,6 +102,7 @@ window.addEventListener("orientationchange", () => setTimeout(setH, 200));
           <div class="chat-hdr-name" id="chat-name">…</div>
           <div class="chat-hdr-sub"  id="chat-sub"></div>
         </div>
+        <button class="btn-chat-del" id="btn-delete-conv" onclick="deleteCurrentConversation()" title="Supprimer la conversation">🗑</button>
       </div>
       <div class="messages" id="messages"></div>
       <div class="input-area">
@@ -270,7 +295,9 @@ async function selectConv(id){
   document.getElementById("messages").innerHTML = "";
   if(currentListener) currentListener();
   const ref = db.ref("fts_dm/messages/"+id).limitToLast(80);
-  ref.on("child_added", snap => addMsg(snap.val(), snap.val().senderId === myUid));
+  ref.on("child_added", snap => addMsg(snap.key, snap.val(), snap.val().senderId === myUid));
+  ref.on("child_changed", snap => updateMsg(snap.key, snap.val()));
+  ref.on("child_removed", snap => removeMsg(snap.key));
   currentListener = () => ref.off();
 
   /* Marquer lu */
@@ -314,7 +341,11 @@ async function sendMessage(){
 /* ── BULLE ───────────────────────────────────────────────────── */
 function isGroupConv(){ const c=allConvs.find(x=>x.id===currentConvId); return c&&c.data&&c.data.type==="group"; }
 
-function addMsg(m, own){
+function msgTextHtml(m){
+  return FTS.esc(m.text || '').replace(/\n/g,"<br>");
+}
+
+function addMsg(key, m, own){
   const wrap = document.getElementById("messages");
   const dStr = new Date(m.ts).toDateString();
   if(dStr !== lastMsgDate){
@@ -326,19 +357,76 @@ function addMsg(m, own){
   }
   const div = document.createElement("div");
   div.className = "msg-wrap " + (own ? "own" : "other");
+  div.id = "msg-" + key;
+  div.dataset.key = key;
   const showSender = !own && isGroupConv();
   div.innerHTML = `
     ${showSender ? `<div class="msg-sender">${FTS.esc(m.senderName)}</div>` : ""}
     <div class="msg-bubble">
-      ${FTS.esc(m.text).replace(/\n/g,"<br>")}
+      <span class="msg-text-content">${msgTextHtml(m)}</span>
+      ${m.editedAt ? '<span class="msg-edited">modifié</span>' : ''}
       <div class="msg-foot">
         <span class="msg-time">${fmtFull(m.ts)}</span>
         ${own ? '<span class="msg-check">✓✓</span>' : ""}
       </div>
-    </div>`;
+    </div>
+    ${own ? `<div class="msg-actions">
+      <button class="msg-act" onclick="editMessage('${key}')">Modifier</button>
+      <button class="msg-act danger" onclick="deleteMessage('${key}')">Supprimer</button>
+    </div>` : ""}`;
   wrap.appendChild(div);
   wrap.scrollTop = wrap.scrollHeight;
 }
+
+function updateMsg(key, m){
+  const el = document.getElementById("msg-" + key);
+  if(!el) return;
+  const txt = el.querySelector(".msg-text-content");
+  if(txt) txt.innerHTML = msgTextHtml(m);
+  const bubble = el.querySelector(".msg-bubble");
+  if(bubble && m.editedAt && !bubble.querySelector(".msg-edited")){
+    const marker = document.createElement("span");
+    marker.className = "msg-edited";
+    marker.textContent = "modifié";
+    bubble.insertBefore(marker, bubble.querySelector(".msg-foot"));
+  }
+}
+
+function removeMsg(key){
+  const el = document.getElementById("msg-" + key);
+  if(el) el.remove();
+}
+
+async function editMessage(key){
+  if(!currentConvId || !key) return;
+  const snap = await db.ref("fts_dm/messages/"+currentConvId+"/"+key).once("value");
+  const msg = snap.val();
+  if(!msg || msg.senderId !== myUid) return;
+  const next = prompt("Modifier le message :", msg.text || "");
+  if(next === null) return;
+  const text = next.trim();
+  if(!text) return alert("Le message ne peut pas être vide.");
+  await db.ref("fts_dm/messages/"+currentConvId+"/"+key).update({ text, editedAt: Date.now() });
+  const conv = allConvs.find(c => c.id === currentConvId);
+  if(conv && conv.data && conv.data.lastSenderName === (me.name || me.email)){
+    await db.ref("fts_dm/conversations/"+currentConvId).update({ lastMessage: text.substring(0,80), lastTs: Date.now() });
+  }
+}
+
+async function deleteMessage(key){
+  if(!currentConvId || !key) return;
+  if(!confirm("Supprimer ce message ?")) return;
+  await db.ref("fts_dm/messages/"+currentConvId+"/"+key).remove();
+}
+
+async function deleteCurrentConversation(){
+  if(!currentConvId) return;
+  if(!confirm("Supprimer cette conversation de ta messagerie ?\n\nElle restera visible pour les autres participants.")) return;
+  const id = currentConvId;
+  await db.ref("fts_dm/userConvs/"+myUid+"/"+id).remove();
+  closeChat();
+}
+
 
 /* ── MODAL ───────────────────────────────────────────────────── */
 function openModal(){
