@@ -223,108 +223,96 @@ FTS.scrollBottom = function(el) {
   if (el) el.scrollTop = el.scrollHeight;
 };
 
-
-/* ── CATALOGUE DISCIPLINES PARTAGÉ ────────────────────────────── */
-FTS.CATEGORIES = [
-  { icon:"🎭", name:"Theatre",          subcats:["7/9 ans","10/12 ans","13/15 ans","Impro","10/17 ans - Lundi","Adultes - Lundi","Adultes - Vendredi"] },
-  { icon:"🎤", name:"Chant",            subcats:[] },
-  { icon:"💃", name:"Danse",            subcats:["Les Baby Show","Show Danse Junior","Ados / Adultes"] },
-  { icon:"🎸", name:"Musique",          subcats:["Guitare","Basse","Batterie","Piano","Formation Musicale"] },
-  { icon:"⭐", name:"Singer Academy",   subcats:["Loisir","Spectacle"] },
-  { icon:"🎬", name:"Comedie Musicale", subcats:["Kids","Enfants","Adultes"] },
-  { icon:"🌟", name:"Singer Show",      subcats:[] },
-  { icon:"🎨", name:"Atelier",          subcats:[] },
+/* ── CONFIG CATÉGORIES PARTAGÉES ─────────────────────────────── */
+FTS.DEFAULT_CATEGORIES = FTS.DEFAULT_CATEGORIES || [
+  { icon:'🎭', name:'Theatre', subcats:['7/9 ans','10/12 ans','13/15 ans','Impro','10/17 ans - Lundi','Adultes - Lundi','Adultes - Vendredi'], order:10 },
+  { icon:'🎤', name:'Chant', subcats:[], order:20 },
+  { icon:'💃', name:'Danse', subcats:['Les Baby Show','Show Danse Junior','Ados / Adultes'], order:30 },
+  { icon:'🎸', name:'Musique', subcats:['Guitare','Basse','Batterie','Piano','Formation Musicale'], order:40 },
+  { icon:'⭐', name:'Singer Academy', subcats:['Loisir','Spectacle'], order:50 },
+  { icon:'🎬', name:'Comedie Musicale', subcats:['Kids','Enfants','Adultes'], order:60 },
+  { icon:'🌟', name:'Singer Show', subcats:[], order:70 },
+  { icon:'🎨', name:'Atelier', subcats:[], order:80 }
 ];
+FTS.CATEGORIES = FTS.DEFAULT_CATEGORIES;
 
-
-/* ── CATALOGUE DYNAMIQUE FIREBASE ──────────────────────────────── */
-FTS.DEFAULT_CATEGORIES = FTS.CATEGORIES || [];
-
-FTS.mergeCategoryStructures = function(...sources) {
-  const map = new Map();
-  function addCat(name, icon, subcats, order, active=true) {
-    if (!name || active === false) return;
-    const key = FTS.norm(name);
-    if (!map.has(key)) map.set(key, { name, icon: icon || FTS.catIcon(name), subcats: [], order: order || 999 });
-    const cat = map.get(key);
-    if (icon) cat.icon = icon;
-    if (order !== undefined && order !== null) cat.order = order;
-    (subcats || []).forEach(sub => {
-      if (sub && typeof sub === 'object' && sub.active === false) return;
-      const subName = typeof sub === 'string' ? sub : (sub && (sub.name || sub.label));
-      if (subName && !cat.subcats.some(x => FTS.norm(x) === FTS.norm(subName))) cat.subcats.push(subName);
-    });
-  }
-  sources.forEach(src => {
-    if (!src) return;
-    if (Array.isArray(src)) {
-      src.forEach(c => addCat(c.name || c.category || c.cat, c.icon, c.subcats || c.subs, c.order, c.active));
-    } else {
-      Object.values(src).forEach(c => {
-        if (!c) return;
-        let subs = c.subcats || c.subs || [];
-        if (!Array.isArray(subs) && typeof subs === 'object') subs = Object.values(subs).map(x => typeof x === 'string' ? x : (x && (x.name || x.label)));
-        addCat(c.name || c.category || c.cat, c.icon, subs, c.order, c.active);
-      });
-    }
-  });
-  return Array.from(map.values()).sort((a,b)=>(a.order||999)-(b.order||999) || a.name.localeCompare(b.name, 'fr'));
+FTS.getDefaultCategoryStructure = function() {
+  return (FTS.DEFAULT_CATEGORIES || []).map(c => ({
+    category: c.name || c.category,
+    name: c.name || c.category,
+    icon: c.icon || FTS.catIcon(c.name || c.category),
+    order: c.order || 999,
+    active: c.active !== false,
+    subs: (c.subcats || []).map(s => ({ name: s, active: true }))
+  }));
 };
 
-FTS.getCategoryStructure = function(categories) {
-  const source = categories || FTS.DEFAULT_CATEGORIES || FTS.CATEGORIES || [];
-  return source.map(c => ({
-    category: c.name || c.category || c.cat,
-    icon: c.icon || FTS.catIcon(c.name || c.category || c.cat),
-    subs: (c.subcats || c.subs || []).map(s => ({ name: typeof s === 'string' ? s : (s && (s.name || s.label)) })).filter(s => s.name)
-  }));
+FTS.getCategoryStructure = function() {
+  return FTS.getDefaultCategoryStructure();
 };
 
 FTS.getCategoryStructureAsync = async function(db) {
-  let dyn = null, fromResources = [];
+  if (!db) return FTS.getDefaultCategoryStructure();
   try {
     const snap = await db.ref('fts_content/categories').once('value');
-    dyn = snap.val();
-  } catch(e) {}
-  try {
-    const snap = await db.ref('fts_ressources').once('value');
-    if (snap.exists()) snap.forEach(child => {
-      const r = child.val() || {};
-      if (r.active === false || r.status === 'inactive') return;
-      const name = r.cat || r.category;
-      const sub = r.subcat || r.subcategory;
-      if (name) fromResources.push({ name, icon: FTS.catIcon(name), subcats: sub ? [sub] : [] });
+    if (!snap.exists()) return FTS.getDefaultCategoryStructure();
+    const rows = [];
+    snap.forEach(child => {
+      const v = child.val() || {};
+      if (v.active === false) return;
+      const name = v.name || v.category || child.key;
+      const subs = [];
+      const rawSubs = v.subcats || v.subcategories || {};
+      if (Array.isArray(rawSubs)) {
+        rawSubs.forEach(s => {
+          if (typeof s === 'string') subs.push({ name: s, active: true });
+          else if (s && s.active !== false && (s.name || s.label)) subs.push({ name: s.name || s.label, active: true });
+        });
+      } else {
+        Object.values(rawSubs).forEach(s => {
+          if (typeof s === 'string') subs.push({ name: s, active: true });
+          else if (s && s.active !== false && (s.name || s.label)) subs.push({ name: s.name || s.label, active: true });
+        });
+      }
+      rows.push({
+        key: child.key,
+        category: name,
+        name,
+        icon: v.icon || v.emoji || FTS.catIcon(name),
+        order: Number(v.order || 999),
+        active: v.active !== false,
+        subs
+      });
     });
-  } catch(e) {}
-  const hasDyn = dyn && Object.keys(dyn).length;
-  const merged = hasDyn
-    ? FTS.mergeCategoryStructures(dyn, fromResources)
-    : FTS.mergeCategoryStructures(FTS.DEFAULT_CATEGORIES, fromResources);
-  return FTS.getCategoryStructure(merged);
-};
-
-FTS.categoryOptionsFromStructure = function(structure) {
-  return (structure || []).map(c => ({
-    value: c.category,
-    label: (c.icon || FTS.catIcon(c.category)) + ' ' + c.category,
-    icon: c.icon || FTS.catIcon(c.category),
-    subcats: (c.subs || []).map(s => s.name).filter(Boolean)
-  }));
-};
-
-FTS.ensureResourceCategory = async function(db, data) {
-  const cat = data.cat || data.category;
-  const sub = data.subcat || data.subcategory;
-  if (!db || !cat) return;
-  const catKey = FTS.norm(cat);
-  const upd = {};
-  upd['fts_content/categories/' + catKey + '/name'] = cat;
-  upd['fts_content/categories/' + catKey + '/icon'] = FTS.catIcon(cat);
-  upd['fts_content/categories/' + catKey + '/active'] = true;
-  upd['fts_content/categories/' + catKey + '/updatedAt'] = Date.now();
-  if (sub) {
-    const subKey = FTS.norm(sub);
-    upd['fts_content/categories/' + catKey + '/subcats/' + subKey] = { name: sub, active: true, updatedAt: Date.now() };
+    rows.sort((a,b)=>(a.order||999)-(b.order||999)||(a.category||'').localeCompare(b.category||'', 'fr'));
+    return rows.length ? rows : FTS.getDefaultCategoryStructure();
+  } catch(e) {
+    console.warn('[FTS] getCategoryStructureAsync fallback', e);
+    return FTS.getDefaultCategoryStructure();
   }
-  await db.ref().update(upd);
+};
+
+FTS.ensureResourceCategory = async function(db, resource) {
+  if (!db || !resource) return;
+  const cat = (resource.cat || resource.category || '').trim();
+  if (!cat) return;
+  const key = FTS.norm(cat);
+  const now = Date.now();
+  const ref = db.ref('fts_content/categories/' + key);
+  const snap = await ref.once('value');
+  const updates = {};
+  if (!snap.exists()) {
+    updates.name = cat;
+    updates.icon = resource.icon || FTS.catIcon(cat);
+    updates.emoji = updates.icon;
+    updates.order = 999;
+    updates.active = true;
+    updates.createdAt = now;
+  }
+  updates.updatedAt = now;
+  const sub = (resource.subcat || resource.subcategory || '').trim();
+  if (sub) {
+    updates['subcats/' + FTS.norm(sub)] = { name: sub, active: true, updatedAt: now };
+  }
+  await ref.update(updates);
 };
