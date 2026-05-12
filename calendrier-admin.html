@@ -92,6 +92,7 @@ function listenEvents(){
     if(snap.exists()) snap.forEach(child=>events.push(normalizeEvent(child.key, child.val()||{})));
     events.sort((a,b)=>(a.dateTs||Number.MAX_SAFE_INTEGER)-(b.dateTs||Number.MAX_SAFE_INTEGER)||(a.name||'').localeCompare(b.name||'', 'fr'));
     renderList();
+    syncAllQuestionnaireEvents();
   }, err=>{ console.warn('[FTS Calendrier] events', err); $('event-list').innerHTML='<div class="empty">Impossible de charger les événements.</div>'; });
 }
 
@@ -170,6 +171,78 @@ function dateTs(iso,hour){
   d.setHours(Number(h[0]||0), Number(h[1]||0), 0, 0);
   return d.getTime();
 }
+function questionnaireEventKey(key){ return 'event_' + String(key || '').replace(/[^a-zA-Z0-9_-]/g, '_'); }
+
+function eventQuestionnaireData(key, data){
+  const title = data.name || data.title || data.n || '';
+  const date = data.dateLabel || data.date || data.d || '';
+  const hour = data.hour || data.h || '';
+  const place = data.location || data.l || '';
+  const details = [];
+  if(date) details.push({key:'Date', value: hour ? `${date} · ${hour}` : date});
+  if(place) details.push({key:'Lieu', value: place});
+  return {
+    source:'fts_events',
+    eventKey:key,
+    type:'event',
+    order:Number(data.dateTs || 9999999999999),
+    icon:'🎪',
+    active:data.active!==false && data.status!=='inactive',
+    status:(data.active!==false && data.status!=='inactive') ? 'active' : 'inactive',
+    title,titre:title,
+    description:data.description || data.type || '',
+    desc:data.description || data.type || '',
+    link:data.url || '',
+    lien:data.url || '',
+    destTitle:title,
+    dest_titre:title,
+    destDesc:data.description || (date ? (hour ? `${date} · ${hour}` : date) : ''),
+    dest_desc:data.description || (date ? (hour ? `${date} · ${hour}` : date) : ''),
+    details,
+    dateTs:Number(data.dateTs || 0),
+    dateLabel:date,
+    date:data.date || date,
+    hour,
+    location:place,
+    url:data.url || '',
+    updatedAt:Date.now()
+  };
+}
+
+async function mirrorEventToQuestionnaire(key, data){
+  if(!key || !data) return;
+  await db.ref('fts_content/questionnaire/options/' + questionnaireEventKey(key)).set(eventQuestionnaireData(key, data));
+}
+
+async function removeEventQuestionnaireMirror(key){
+  if(!key) return;
+  await db.ref('fts_content/questionnaire/options/' + questionnaireEventKey(key)).remove();
+}
+
+let mirrorSyncBusy = false;
+async function syncAllQuestionnaireEvents(){
+  if(mirrorSyncBusy) return;
+  mirrorSyncBusy = true;
+  try{
+    const updates = {};
+    const activeKeys = new Set(events.map(e => questionnaireEventKey(e.key)));
+    events.forEach(e => { updates['fts_content/questionnaire/options/' + questionnaireEventKey(e.key)] = eventQuestionnaireData(e.key, {
+      name:e.name, title:e.name, n:e.name, type:e.type, active:e.active, status:e.active?'active':'inactive',
+      date:e.date, dateLabel:e.dateLabel, d:e.dateLabel, hour:e.hour, h:e.hour, location:e.location, l:e.location,
+      url:e.url, description:e.desc, dateTs:e.dateTs
+    }); });
+    const snap = await db.ref('fts_content/questionnaire/options').once('value');
+    if(snap.exists()) snap.forEach(ch => {
+      const v = ch.val() || {};
+      if(v.source === 'fts_events' && String(ch.key).indexOf('event_') === 0 && !activeKeys.has(ch.key)) {
+        updates['fts_content/questionnaire/options/' + ch.key] = null;
+      }
+    });
+    if(Object.keys(updates).length) await db.ref().update(updates);
+  }catch(e){ console.warn('[FTS Calendrier] miroir questionnaire', e); }
+  finally{ mirrorSyncBusy = false; }
+}
+
 async function saveEvent(){
   const name=$('e-name').value.trim();
   const iso=$('e-date').value;
@@ -202,6 +275,7 @@ async function saveEvent(){
   };
   if(!$('e-key').value) data.createdAt=Date.now();
   await db.ref('fts_events/'+key).set(data);
+  await mirrorEventToQuestionnaire(key, data);
   selectedKey=key; $('e-key').value=key;
   msg('Événement enregistré');
 }
@@ -210,6 +284,7 @@ async function deleteEvent(){
   if(!key){ msg('Sélectionne un événement à supprimer', false); return; }
   if(!confirm('Supprimer définitivement cet événement ?')) return;
   await db.ref('fts_events/'+key).remove();
+  await removeEventQuestionnaireMirror(key);
   newEvent();
   msg('Événement supprimé');
 }

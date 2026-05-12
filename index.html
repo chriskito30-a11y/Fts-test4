@@ -318,10 +318,11 @@ let step3Options = {};
 
 /* ── CHARGEMENT QUESTIONNAIRE FIREBASE ────────────────────────── */
 async function loadQuestionnaire() {
+  const db = FTS.initFirebase();
+  let rows = [];
+
   try {
-    const db = FTS.initFirebase();
     const snap = await db.ref('fts_content/questionnaire').once('value');
-    const rows = [];
     const root = snap.val() || {};
 
     // Format officiel : fts_content/questionnaire/options/{id}
@@ -342,22 +343,35 @@ async function loadQuestionnaire() {
       rows.push({ id: key, ...v });
     });
 
+    // Les options classiques restent gérées par contenus-admin.
+    // Les options "event" sont ignorées ici : elles viennent du calendrier.
     step3Options = buildStep3Options(rows);
-
-    // Les événements du questionnaire utilisent la même source officielle
-    // que la page membres : fts_events.
-    const eventOptions = await loadUpcomingEventOptions(db);
-    step3Options.event = {
-      question: CFG.step3Questions.event.q,
-      desc: eventOptions.length
-        ? CFG.step3Questions.event.d
-        : 'Aucun événement à venir pour le moment.',
-      options: eventOptions
-    };
   } catch (e) {
     console.warn('[FTS] Impossible de charger le questionnaire Firebase :', e);
     step3Options = {};
   }
+
+  // Source prioritaire des événements : calendrier-admin / fts_events.
+  // Si l'accueil ne peut pas lire fts_events, fallback sur le miroir créé par calendrier-admin
+  // dans fts_content/questionnaire/options/event_xxx.
+  try {
+    let eventOptions = await loadUpcomingEventOptions(db);
+    if (!eventOptions.length) eventOptions = buildMirroredEventOptions(rows);
+    step3Options.event = {
+      question: CFG.step3Questions.event.q,
+      desc: eventOptions.length ? CFG.step3Questions.event.d : 'Aucun événement à venir pour le moment.',
+      options: eventOptions
+    };
+  } catch (e) {
+    console.warn('[FTS] Impossible de charger les événements calendrier :', e);
+    const fallbackEvents = buildMirroredEventOptions(rows);
+    step3Options.event = {
+      question: CFG.step3Questions.event.q,
+      desc: fallbackEvents.length ? CFG.step3Questions.event.d : 'Aucun événement à venir pour le moment.',
+      options: fallbackEvents
+    };
+  }
+
   initPage();
 }
 
@@ -411,6 +425,43 @@ async function loadUpcomingEventOptions(db) {
   });
 }
 
+function buildMirroredEventOptions(rows) {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
+  return (rows || [])
+    .filter(row => String(row.type || '').toLowerCase().trim() === 'event')
+    .filter(row => String(row.id || '').indexOf('event_') === 0 || row.source === 'fts_events')
+    .filter(row => row.active !== false && row.status !== 'inactive')
+    .map((row, index) => {
+      const title = row.title || row.titre || '';
+      const ts = Number(row.dateTs || row.startTs || row.ts || row.order || 0);
+      const date = row.dateLabel || row.date || row.d || '';
+      const hour = row.hour || row.heure || row.time || row.h || '';
+      const place = row.location || row.lieu || row.l || '';
+      const detail = [];
+      if (date) detail.push(['Date', hour ? `${date} · ${hour}` : date]);
+      if (place) detail.push(['Lieu', place]);
+      return {
+        id: row.id || ('event_' + index),
+        icon: row.icon || '🎪',
+        title,
+        desc: row.description || row.desc || row.typeLabel || '',
+        detail,
+        link: row.link || row.lien || row.url || '#',
+        destTitle: row.destTitle || row.dest_titre || title,
+        destDesc: row.destDesc || row.dest_desc || row.description || row.desc || (date ? (hour ? `${date} · ${hour}` : date) : ''),
+        ts,
+        date
+      };
+    })
+    .filter(e => e.title && (!e.ts || e.ts >= startOfToday.getTime()))
+    .sort((a, b) => {
+      if (a.ts || b.ts) return (a.ts || Number.MAX_SAFE_INTEGER) - (b.ts || Number.MAX_SAFE_INTEGER);
+      return String(a.date).localeCompare(String(b.date), 'fr');
+    });
+}
+
 function buildStep3Options(rows) {
   const result = {};
   rows
@@ -418,12 +469,9 @@ function buildStep3Options(rows) {
     .forEach((row, index) => {
       const type = String(row.type || '').toLowerCase().trim();
       const title = row.title || row.titre || '';
-
-      // Les options de type "event" ne viennent plus de contenus-admin.
-      // Source unique pour "Acheter une place" : fts_events via calendrier-admin.
-      // Cela évite qu'une ancienne option du questionnaire masque le calendrier.
+      // Les événements ne sont plus pilotés par contenus-admin.
+      // Source officielle : calendrier-admin / fts_events.
       if (type === 'event') return;
-
       if (!type || !title) return;
 
       if (!result[type]) {
