@@ -347,13 +347,13 @@ async function loadQuestionnaire() {
     // Les événements du questionnaire utilisent la même source officielle
     // que la page membres : fts_events.
     const eventOptions = await loadUpcomingEventOptions(db);
-    if (eventOptions.length) {
-      step3Options.event = {
-        question: CFG.step3Questions.event.q,
-        desc: CFG.step3Questions.event.d,
-        options: eventOptions
-      };
-    }
+    step3Options.event = {
+      question: CFG.step3Questions.event.q,
+      desc: eventOptions.length
+        ? CFG.step3Questions.event.d
+        : 'Aucun événement à venir pour le moment.',
+      options: eventOptions
+    };
   } catch (e) {
     console.warn('[FTS] Impossible de charger le questionnaire Firebase :', e);
     step3Options = {};
@@ -418,6 +418,12 @@ function buildStep3Options(rows) {
     .forEach((row, index) => {
       const type = String(row.type || '').toLowerCase().trim();
       const title = row.title || row.titre || '';
+
+      // Les options de type "event" ne viennent plus de contenus-admin.
+      // Source unique pour "Acheter une place" : fts_events via calendrier-admin.
+      // Cela évite qu'une ancienne option du questionnaire masque le calendrier.
+      if (type === 'event') return;
+
       if (!type || !title) return;
 
       if (!result[type]) {
@@ -584,9 +590,11 @@ function showDest() {
       <div class="dest-title">${FTS.esc(opt.destTitle || opt.title)}</div>
       <div class="dest-desc">${FTS.esc(opt.destDesc  || opt.desc)}</div>
       ${details ? '<div class="dest-details">' + details + '</div>' : ''}
-      <a href="${opt.link}" class="btn-helloasso" target="_blank" rel="noopener">
-        S'inscrire sur HelloAsso →
-      </a>
+      ${opt.link && opt.link !== '#' ? `
+      <a href="${FTS.esc(opt.link)}" class="btn-helloasso" target="_blank" rel="noopener">
+        ${state.step2 === 'event' ? 'Réserver / voir les infos →' : "S'inscrire sur HelloAsso →"}
+      </a>` : `
+      <div class="error-msg" style="margin-bottom:.8rem">Lien bientôt disponible.</div>`}
       <button class="btn-ghost" onclick="restart()">Recommencer depuis le début</button>
     </div>`;
 }
