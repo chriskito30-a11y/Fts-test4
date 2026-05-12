@@ -319,8 +319,10 @@ let step3Options = {};
 /* ── CHARGEMENT QUESTIONNAIRE FIREBASE ────────────────────────── */
 async function loadQuestionnaire() {
   const db = FTS.initFirebase();
-  let rows = [];
+  const rows = [];
 
+  // 1) Source publique du questionnaire : fts_content/questionnaire.
+  // Elle reste chargée même si la lecture de fts_events est refusée par les règles Firebase.
   try {
     const snap = await db.ref('fts_content/questionnaire').once('value');
     const root = snap.val() || {};
@@ -342,36 +344,29 @@ async function loadQuestionnaire() {
       if (v.active === false || v.status === 'inactive') return;
       rows.push({ id: key, ...v });
     });
-
-    // Les options classiques restent gérées par contenus-admin.
-    // Les options "event" sont ignorées ici : elles viennent du calendrier.
-    step3Options = buildStep3Options(rows);
   } catch (e) {
-    console.warn('[FTS] Impossible de charger le questionnaire Firebase :', e);
-    step3Options = {};
+    console.warn('[FTS] Impossible de charger fts_content/questionnaire :', e);
   }
 
-  // Source prioritaire des événements : calendrier-admin / fts_events.
-  // Si l'accueil ne peut pas lire fts_events, fallback sur le miroir créé par calendrier-admin
-  // dans fts_content/questionnaire/options/event_xxx.
+  step3Options = buildStep3Options(rows);
+
+  // 2) Source calendrier : fts_events. Si elle est lisible publiquement, elle remplace
+  // les anciennes options événement. Si elle est bloquée, on garde les options
+  // synchronisées par calendrier-admin dans fts_content/questionnaire/options.
   try {
-    let eventOptions = await loadUpcomingEventOptions(db);
-    if (!eventOptions.length) eventOptions = buildMirroredEventOptions(rows);
-    step3Options.event = {
-      question: CFG.step3Questions.event.q,
-      desc: eventOptions.length ? CFG.step3Questions.event.d : 'Aucun événement à venir pour le moment.',
-      options: eventOptions
-    };
+    const eventOptions = await loadUpcomingEventOptions(db);
+    if (eventOptions.length) {
+      step3Options.event = {
+        question: CFG.step3Questions.event.q,
+        desc: CFG.step3Questions.event.d,
+        options: eventOptions
+      };
+    }
   } catch (e) {
-    console.warn('[FTS] Impossible de charger les événements calendrier :', e);
-    const fallbackEvents = buildMirroredEventOptions(rows);
-    step3Options.event = {
-      question: CFG.step3Questions.event.q,
-      desc: fallbackEvents.length ? CFG.step3Questions.event.d : 'Aucun événement à venir pour le moment.',
-      options: fallbackEvents
-    };
+    console.warn('[FTS] fts_events non accessible depuis l’accueil, utilisation du miroir questionnaire :', e);
   }
 
+  // 3) Sécurité : si aucun événement futur n'est exploitable, on ne casse pas les autres choix.
   initPage();
 }
 
@@ -425,43 +420,6 @@ async function loadUpcomingEventOptions(db) {
   });
 }
 
-function buildMirroredEventOptions(rows) {
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-
-  return (rows || [])
-    .filter(row => String(row.type || '').toLowerCase().trim() === 'event')
-    .filter(row => String(row.id || '').indexOf('event_') === 0 || row.source === 'fts_events')
-    .filter(row => row.active !== false && row.status !== 'inactive')
-    .map((row, index) => {
-      const title = row.title || row.titre || '';
-      const ts = Number(row.dateTs || row.startTs || row.ts || row.order || 0);
-      const date = row.dateLabel || row.date || row.d || '';
-      const hour = row.hour || row.heure || row.time || row.h || '';
-      const place = row.location || row.lieu || row.l || '';
-      const detail = [];
-      if (date) detail.push(['Date', hour ? `${date} · ${hour}` : date]);
-      if (place) detail.push(['Lieu', place]);
-      return {
-        id: row.id || ('event_' + index),
-        icon: row.icon || '🎪',
-        title,
-        desc: row.description || row.desc || row.typeLabel || '',
-        detail,
-        link: row.link || row.lien || row.url || '#',
-        destTitle: row.destTitle || row.dest_titre || title,
-        destDesc: row.destDesc || row.dest_desc || row.description || row.desc || (date ? (hour ? `${date} · ${hour}` : date) : ''),
-        ts,
-        date
-      };
-    })
-    .filter(e => e.title && (!e.ts || e.ts >= startOfToday.getTime()))
-    .sort((a, b) => {
-      if (a.ts || b.ts) return (a.ts || Number.MAX_SAFE_INTEGER) - (b.ts || Number.MAX_SAFE_INTEGER);
-      return String(a.date).localeCompare(String(b.date), 'fr');
-    });
-}
-
 function buildStep3Options(rows) {
   const result = {};
   rows
@@ -469,9 +427,6 @@ function buildStep3Options(rows) {
     .forEach((row, index) => {
       const type = String(row.type || '').toLowerCase().trim();
       const title = row.title || row.titre || '';
-      // Les événements ne sont plus pilotés par contenus-admin.
-      // Source officielle : calendrier-admin / fts_events.
-      if (type === 'event') return;
       if (!type || !title) return;
 
       if (!result[type]) {
@@ -490,7 +445,7 @@ function buildStep3Options(rows) {
         if ((row.detail2_cle || row.detail2Key) && (row.detail2_valeur || row.detail2Value)) detail.push([row.detail2_cle || row.detail2Key, row.detail2_valeur || row.detail2Value]);
       }
 
-      result[type].options.push({
+      const option = {
         id:        row.id || (type + '_' + index),
         icon:      row.icon || '🎭',
         title:     title,
@@ -499,8 +454,26 @@ function buildStep3Options(rows) {
         link:      row.link || row.lien || '#',
         destTitle: row.destTitle || row.dest_titre || row.destTitleText || title,
         destDesc:  row.destDesc || row.dest_desc || row.description || row.desc || '',
-      });
+        ts:        Number(row.dateTs || row.startTs || row.ts || 0),
+        date:      row.dateLabel || row.date || row.d || ''
+      };
+
+      // Les options événement synchronisées depuis calendrier-admin disparaissent
+      // automatiquement quand la date est passée.
+      if (type === 'event' && option.ts) {
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+        if (option.ts < startOfToday.getTime()) return;
+      }
+
+      result[type].options.push(option);
     });
+  Object.keys(result).forEach(type => {
+    result[type].options.sort((a, b) => {
+      if ((a.ts || 0) || (b.ts || 0)) return (a.ts || Number.MAX_SAFE_INTEGER) - (b.ts || Number.MAX_SAFE_INTEGER);
+      return String(a.title || '').localeCompare(String(b.title || ''), 'fr');
+    });
+  });
   return result;
 }
 
@@ -638,11 +611,9 @@ function showDest() {
       <div class="dest-title">${FTS.esc(opt.destTitle || opt.title)}</div>
       <div class="dest-desc">${FTS.esc(opt.destDesc  || opt.desc)}</div>
       ${details ? '<div class="dest-details">' + details + '</div>' : ''}
-      ${opt.link && opt.link !== '#' ? `
-      <a href="${FTS.esc(opt.link)}" class="btn-helloasso" target="_blank" rel="noopener">
-        ${state.step2 === 'event' ? 'Réserver / voir les infos →' : "S'inscrire sur HelloAsso →"}
-      </a>` : `
-      <div class="error-msg" style="margin-bottom:.8rem">Lien bientôt disponible.</div>`}
+      <a href="${opt.link}" class="btn-helloasso" target="_blank" rel="noopener">
+        S'inscrire sur HelloAsso →
+      </a>
       <button class="btn-ghost" onclick="restart()">Recommencer depuis le début</button>
     </div>`;
 }

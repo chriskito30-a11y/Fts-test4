@@ -92,7 +92,7 @@ function listenEvents(){
     if(snap.exists()) snap.forEach(child=>events.push(normalizeEvent(child.key, child.val()||{})));
     events.sort((a,b)=>(a.dateTs||Number.MAX_SAFE_INTEGER)-(b.dateTs||Number.MAX_SAFE_INTEGER)||(a.name||'').localeCompare(b.name||'', 'fr'));
     renderList();
-    syncAllQuestionnaireEvents();
+    syncAllEventsToQuestionnaire();
   }, err=>{ console.warn('[FTS Calendrier] events', err); $('event-list').innerHTML='<div class="empty">Impossible de charger les événements.</div>'; });
 }
 
@@ -171,78 +171,62 @@ function dateTs(iso,hour){
   d.setHours(Number(h[0]||0), Number(h[1]||0), 0, 0);
   return d.getTime();
 }
-function questionnaireEventKey(key){ return 'event_' + String(key || '').replace(/[^a-zA-Z0-9_-]/g, '_'); }
-
-function eventQuestionnaireData(key, data){
-  const title = data.name || data.title || data.n || '';
+function questionEventKey(eventKey){
+  return 'event_' + String(eventKey || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+function eventToQuestionnaireOption(key, data){
   const date = data.dateLabel || data.date || data.d || '';
   const hour = data.hour || data.h || '';
-  const place = data.location || data.l || '';
+  const location = data.location || data.l || '';
   const details = [];
-  if(date) details.push({key:'Date', value: hour ? `${date} · ${hour}` : date});
-  if(place) details.push({key:'Lieu', value: place});
+  if(date) details.push({ key:'Date', value: hour ? date + ' · ' + hour : date });
+  if(location) details.push({ key:'Lieu', value: location });
   return {
     source:'fts_events',
     eventKey:key,
     type:'event',
     order:Number(data.dateTs || 9999999999999),
-    icon:'🎪',
-    active:data.active!==false && data.status!=='inactive',
-    status:(data.active!==false && data.status!=='inactive') ? 'active' : 'inactive',
-    title,titre:title,
-    description:data.description || data.type || '',
-    desc:data.description || data.type || '',
-    link:data.url || '',
-    lien:data.url || '',
-    destTitle:title,
-    dest_titre:title,
-    destDesc:data.description || (date ? (hour ? `${date} · ${hour}` : date) : ''),
-    dest_desc:data.description || (date ? (hour ? `${date} · ${hour}` : date) : ''),
+    icon:data.icon || '🎪',
+    active:data.active !== false && data.status !== 'inactive',
+    status:(data.active !== false && data.status !== 'inactive') ? 'active' : 'inactive',
+    title:data.name || data.title || data.n || 'Événement',
+    titre:data.name || data.title || data.n || 'Événement',
+    description:data.description || data.desc || data.type || '',
+    desc:data.description || data.desc || data.type || '',
+    link:data.url || data.u || data.link || data.lien || '#',
+    lien:data.url || data.u || data.link || data.lien || '#',
+    destTitle:data.name || data.title || data.n || 'Événement',
+    dest_titre:data.name || data.title || data.n || 'Événement',
+    destDesc:data.description || data.desc || (date ? (hour ? date + ' · ' + hour : date) : ''),
+    dest_desc:data.description || data.desc || (date ? (hour ? date + ' · ' + hour : date) : ''),
     details,
-    dateTs:Number(data.dateTs || 0),
+    detail1_cle:details[0]?.key || '',
+    detail1_valeur:details[0]?.value || '',
+    detail2_cle:details[1]?.key || '',
+    detail2_valeur:details[1]?.value || '',
+    dateTs:Number(data.dateTs || data.startTs || data.ts || 0),
     dateLabel:date,
-    date:data.date || date,
     hour,
-    location:place,
-    url:data.url || '',
+    location,
     updatedAt:Date.now()
   };
 }
-
-async function mirrorEventToQuestionnaire(key, data){
-  if(!key || !data) return;
-  await db.ref('fts_content/questionnaire/options/' + questionnaireEventKey(key)).set(eventQuestionnaireData(key, data));
+async function syncEventToQuestionnaire(key, data){
+  await db.ref('fts_content/questionnaire/options/' + questionEventKey(key)).set(eventToQuestionnaireOption(key, data));
 }
-
-async function removeEventQuestionnaireMirror(key){
-  if(!key) return;
-  await db.ref('fts_content/questionnaire/options/' + questionnaireEventKey(key)).remove();
+async function removeEventFromQuestionnaire(key){
+  await db.ref('fts_content/questionnaire/options/' + questionEventKey(key)).remove();
 }
-
-let mirrorSyncBusy = false;
-async function syncAllQuestionnaireEvents(){
-  if(mirrorSyncBusy) return;
-  mirrorSyncBusy = true;
+async function syncAllEventsToQuestionnaire(){
   try{
+    const snap = await db.ref('fts_events').once('value');
     const updates = {};
-    const activeKeys = new Set(events.map(e => questionnaireEventKey(e.key)));
-    events.forEach(e => { updates['fts_content/questionnaire/options/' + questionnaireEventKey(e.key)] = eventQuestionnaireData(e.key, {
-      name:e.name, title:e.name, n:e.name, type:e.type, active:e.active, status:e.active?'active':'inactive',
-      date:e.date, dateLabel:e.dateLabel, d:e.dateLabel, hour:e.hour, h:e.hour, location:e.location, l:e.location,
-      url:e.url, description:e.desc, dateTs:e.dateTs
-    }); });
-    const snap = await db.ref('fts_content/questionnaire/options').once('value');
-    if(snap.exists()) snap.forEach(ch => {
-      const v = ch.val() || {};
-      if(v.source === 'fts_events' && String(ch.key).indexOf('event_') === 0 && !activeKeys.has(ch.key)) {
-        updates['fts_content/questionnaire/options/' + ch.key] = null;
-      }
+    if(snap.exists()) snap.forEach(child => {
+      updates['fts_content/questionnaire/options/' + questionEventKey(child.key)] = eventToQuestionnaireOption(child.key, child.val() || {});
     });
     if(Object.keys(updates).length) await db.ref().update(updates);
-  }catch(e){ console.warn('[FTS Calendrier] miroir questionnaire', e); }
-  finally{ mirrorSyncBusy = false; }
+  }catch(e){ console.warn('[FTS Calendrier] sync questionnaire', e); }
 }
-
 async function saveEvent(){
   const name=$('e-name').value.trim();
   const iso=$('e-date').value;
@@ -275,16 +259,16 @@ async function saveEvent(){
   };
   if(!$('e-key').value) data.createdAt=Date.now();
   await db.ref('fts_events/'+key).set(data);
-  await mirrorEventToQuestionnaire(key, data);
+  await syncEventToQuestionnaire(key, data);
   selectedKey=key; $('e-key').value=key;
-  msg('Événement enregistré');
+  msg('Événement enregistré — visible dans membres et dans le questionnaire');
 }
 async function deleteEvent(){
   const key=$('e-key').value;
   if(!key){ msg('Sélectionne un événement à supprimer', false); return; }
   if(!confirm('Supprimer définitivement cet événement ?')) return;
   await db.ref('fts_events/'+key).remove();
-  await removeEventQuestionnaireMirror(key);
+  await removeEventFromQuestionnaire(key);
   newEvent();
   msg('Événement supprimé');
 }
