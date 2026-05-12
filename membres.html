@@ -20,22 +20,14 @@
 /* ── BOTTOM NAV ──────────────────────────────────────────────── */
 .bottom-nav {
   position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 9999;
-  height: calc(60px + env(safe-area-inset-bottom));
-  padding-bottom: env(safe-area-inset-bottom);
+  bottom: 0; left: 0; right: 0;
+  z-index: 100;
   background: #0d0d0d;
   border-top: 1px solid #1e1e1e;
   display: flex;
   align-items: stretch;
-  transform: translateZ(0);
-  -webkit-transform: translateZ(0);
-}
-
-body {
-  padding-bottom: calc(72px + env(safe-area-inset-bottom));
+  height: 60px;
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 .bnav-item {
@@ -69,8 +61,8 @@ body {
   transition: color .2s;
 }
 
-/* Ancien espace de nav : la marge est maintenant portée par body */
-.bnav-spacer { display: none; }
+/* Espace sous le contenu pour la nav fixe */
+.bnav-spacer { height: 72px; }
 
 /* Badge non lus sur nav */
 .bnav-icon-wrap { position: relative; display: inline-block; line-height: 1; }
@@ -602,6 +594,29 @@ button.profile-pill:hover {
 <!-- ── CONTENU PRINCIPAL (caché jusqu'à auth OK) ──────────────── -->
 <div id="page-content" style="display:none">
 
+  <!-- BOTTOM NAV -->
+  <nav class="bottom-nav" aria-label="Navigation principale">
+    <a href="membres.html" class="bnav-item active" aria-current="page">
+      <span class="bnav-icon">👤</span><span>Membres</span>
+    </a>
+    <a href="messages.html" class="bnav-item">
+      <span class="bnav-icon-wrap">
+        <span class="bnav-icon">✉️</span>
+        <span class="bnav-badge" id="msg-badge">0</span>
+      </span>
+      <span>Messages</span>
+    </a>
+    <a href="forum.html" class="bnav-item">
+      <span class="bnav-icon">💬</span><span>Forum</span>
+    </a>
+    <a href="profs.html" class="bnav-item" id="bnav-profs" style="display:none">
+      <span class="bnav-icon">🎓</span><span>Profs</span>
+    </a>
+    <a href="admin.html" class="bnav-item" id="bnav-admin" style="display:none">
+      <span class="bnav-icon">🛡</span><span>Admin</span>
+    </a>
+  </nav>
+
   <div class="wrap">
 
     <!-- En-tête -->
@@ -683,30 +698,6 @@ button.profile-pill:hover {
 
   </div>
 </div><!-- /page-content -->
-
-<!-- BOTTOM NAV -->
-  <nav class="bottom-nav" aria-label="Navigation principale">
-    <a href="membres.html" class="bnav-item active" aria-current="page">
-      <span class="bnav-icon">👤</span><span>Membres</span>
-    </a>
-    <a href="messages.html" class="bnav-item">
-      <span class="bnav-icon-wrap">
-        <span class="bnav-icon">✉️</span>
-        <span class="bnav-badge" id="msg-badge">0</span>
-      </span>
-      <span>Messages</span>
-    </a>
-    <a href="forum.html" class="bnav-item">
-      <span class="bnav-icon">💬</span><span>Forum</span>
-    </a>
-    <a href="profs.html" class="bnav-item" id="bnav-profs" style="display:none">
-      <span class="bnav-icon">🎓</span><span>Profs</span>
-    </a>
-    <a href="admin.html" class="bnav-item" id="bnav-admin" style="display:none">
-      <span class="bnav-icon">🛡</span><span>Admin</span>
-    </a>
-  </nav>
-
 
 
 

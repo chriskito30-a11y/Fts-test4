@@ -343,11 +343,72 @@ async function loadQuestionnaire() {
     });
 
     step3Options = buildStep3Options(rows);
+
+    // Les événements du questionnaire utilisent la même source officielle
+    // que la page membres : fts_events.
+    const eventOptions = await loadUpcomingEventOptions(db);
+    if (eventOptions.length) {
+      step3Options.event = {
+        question: CFG.step3Questions.event.q,
+        desc: CFG.step3Questions.event.d,
+        options: eventOptions
+      };
+    }
   } catch (e) {
     console.warn('[FTS] Impossible de charger le questionnaire Firebase :', e);
     step3Options = {};
   }
   initPage();
+}
+
+function normalizeEventTs(v) {
+  return Number(v.dateTs || v.startTs || v.ts || 0);
+}
+
+async function loadUpcomingEventOptions(db) {
+  const snap = await db.ref('fts_events').once('value');
+  const events = [];
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
+  if (snap.exists()) {
+    snap.forEach(child => {
+      const v = child.val() || {};
+      if (v.active === false || v.status === 'inactive') return;
+
+      const ts = normalizeEventTs(v);
+      const title = v.name || v.nom || v.title || v.titre || v.n || '';
+      const date  = v.dateLabel || v.date || v.d || '';
+      const hour  = v.hour || v.heure || v.time || v.h || '';
+      const place = v.location || v.lieu || v.l || '';
+      const link  = v.url || v.link || v.lien || v.u || '#';
+
+      if (!title || (!date && !ts)) return;
+      if (ts && ts < startOfToday.getTime()) return;
+
+      const detail = [];
+      if (date) detail.push(['Date', hour ? `${date} · ${hour}` : date]);
+      if (place) detail.push(['Lieu', place]);
+
+      events.push({
+        id: child.key,
+        icon: v.icon || '🎪',
+        title,
+        desc: v.description || v.desc || v.type || '',
+        detail,
+        link,
+        destTitle: title,
+        destDesc: v.description || v.desc || (date ? (hour ? `${date} · ${hour}` : date) : '') || '' ,
+        ts,
+        date
+      });
+    });
+  }
+
+  return events.sort((a, b) => {
+    if (a.ts || b.ts) return (a.ts || Number.MAX_SAFE_INTEGER) - (b.ts || Number.MAX_SAFE_INTEGER);
+    return String(a.date).localeCompare(String(b.date), 'fr');
+  });
 }
 
 function buildStep3Options(rows) {
