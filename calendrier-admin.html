@@ -35,7 +35,7 @@
         <div class="mini-title">Événements Firebase</div>
         <div class="event-list" id="event-list"><div class="empty">Chargement…</div></div>
         <button class="btn-gold" style="margin-top:.8rem" onclick="newEvent()">+ Ajouter un événement</button>
-        <p class="hint" style="margin-top:.8rem">Source officielle V1 : <strong>fts_events</strong>. Cette page remplace l’ancien calendrier Google Sheets.</p>
+        <p class="hint" style="margin-top:.8rem">Source officielle : <strong>fts_events</strong>. Cette page affiche aussi les anciens événements synchronisés dans le questionnaire afin de pouvoir les migrer, modifier ou supprimer.</p>
       </div>
 
       <div class="card-admin">
@@ -87,13 +87,79 @@ function init(){
 }
 
 function listenEvents(){
-  db.ref('fts_events').on('value', snap=>{
-    events=[];
-    if(snap.exists()) snap.forEach(child=>events.push(normalizeEvent(child.key, child.val()||{})));
-    events.sort((a,b)=>(a.dateTs||Number.MAX_SAFE_INTEGER)-(b.dateTs||Number.MAX_SAFE_INTEGER)||(a.name||'').localeCompare(b.name||'', 'fr'));
+  // On écoute les deux sources :
+  // 1) fts_events = source officielle membres
+  // 2) fts_content/questionnaire/options = copie publique utilisée par index
+  // Cela permet de retrouver/modifier les anciens événements déjà synchronisés.
+  const reload = () => loadEventsFromAllSources();
+  db.ref('fts_events').on('value', reload, err=>{
+    console.warn('[FTS Calendrier] events', err);
+    $('event-list').innerHTML='<div class="empty">Impossible de charger les événements fts_events.</div>';
+  });
+  db.ref('fts_content/questionnaire/options').on('value', reload, err=>{
+    console.warn('[FTS Calendrier] questionnaire events', err);
+  });
+}
+
+async function loadEventsFromAllSources(){
+  try{
+    const [evtSnap, qSnap] = await Promise.all([
+      db.ref('fts_events').once('value'),
+      db.ref('fts_content/questionnaire/options').once('value')
+    ]);
+
+    const byKey = new Map();
+
+    if(evtSnap.exists()) evtSnap.forEach(child=>{
+      const e = normalizeEvent(child.key, child.val()||{});
+      e.source = 'events';
+      e.eventKey = child.key;
+      e.qKey = questionEventKey(child.key);
+      byKey.set(child.key, e);
+    });
+
+    if(qSnap.exists()) qSnap.forEach(child=>{
+      const v = child.val() || {};
+      if(String(v.type || '').toLowerCase() !== 'event') return;
+      // Les options créées/synchronisées par le calendrier portent source=fts_events,
+      // mais on récupère aussi les anciennes options event créées depuis contenus-admin.
+      const eventKey = v.eventKey || (String(child.key).startsWith('event_') ? String(child.key).replace(/^event_/, '') : child.key);
+      if(byKey.has(eventKey)){
+        const existing = byKey.get(eventKey);
+        existing.qKey = child.key;
+        return;
+      }
+      const e = normalizeEvent(eventKey, {
+        name: v.title || v.titre,
+        type: v.description || v.desc || '',
+        active: v.active,
+        status: v.status,
+        dateIso: v.dateIso || v.isoDate || '',
+        date: v.dateLabel || v.date || v.d || '',
+        dateLabel: v.dateLabel || v.date || v.d || '',
+        hour: v.hour || v.h || '',
+        location: v.location || v.l || '',
+        url: v.link || v.lien || v.url || v.u || '',
+        description: v.destDesc || v.dest_desc || v.description || v.desc || '',
+        dateTs: v.dateTs || v.startTs || v.ts || v.order || 0,
+        updatedAt: v.updatedAt || 0
+      });
+      e.source = 'questionnaire';
+      e.eventKey = eventKey;
+      e.qKey = child.key;
+      byKey.set(eventKey, e);
+    });
+
+    events = Array.from(byKey.values()).sort((a,b)=>
+      (a.dateTs||Number.MAX_SAFE_INTEGER)-(b.dateTs||Number.MAX_SAFE_INTEGER) ||
+      (a.name||'').localeCompare(b.name||'', 'fr')
+    );
     renderList();
     syncAllEventsToQuestionnaire();
-  }, err=>{ console.warn('[FTS Calendrier] events', err); $('event-list').innerHTML='<div class="empty">Impossible de charger les événements.</div>'; });
+  }catch(e){
+    console.warn('[FTS Calendrier] load all sources', e);
+    $('event-list').innerHTML='<div class="empty">Impossible de charger les événements.</div>';
+  }
 }
 
 function normalizeEvent(key, v){
@@ -122,7 +188,7 @@ function renderList(){
     const month=d?d.toLocaleDateString('fr-FR',{month:'short'}).replace('.',''):'Date';
     return `<div class="evt-row${selectedKey===e.key?' sel':''}${!e.active?' evt-off':''}" onclick="editEvent('${FTS.esc(e.key)}')">
       <div class="evt-date"><div class="evt-day">${day}</div><div class="evt-month">${FTS.esc(month)}</div></div>
-      <div class="evt-info"><div class="evt-name">${FTS.esc(e.name||'Sans nom')}<span class="status-pill ${e.active?'status-on':'status-off'}">${e.active?'Visible':'Masqué'}</span></div><div class="evt-meta">${FTS.esc(e.dateLabel||'Date non renseignée')}${e.hour?' · '+FTS.esc(e.hour):''}${e.location?' · '+FTS.esc(e.location):''}</div></div>
+      <div class="evt-info"><div class="evt-name">${FTS.esc(e.name||'Sans nom')}<span class="status-pill ${e.active?'status-on':'status-off'}">${e.active?'Visible':'Masqué'}</span>${e.source==='questionnaire'?'<span class="status-pill status-off">À migrer</span>':''}</div><div class="evt-meta">${FTS.esc(e.dateLabel||'Date non renseignée')}${e.hour?' · '+FTS.esc(e.hour):''}${e.location?' · '+FTS.esc(e.location):''}</div></div>
     </div>`;
   }).join('');
 }
@@ -134,7 +200,7 @@ function newEvent(){
   renderList();
 }
 function editEvent(key){
-  const e=events.find(x=>x.key===key); if(!e) return;
+  const e=events.find(x=>x.key===key || x.eventKey===key); if(!e) return;
   selectedKey=key;
   $('e-key').value=e.key;
   $('e-name').value=e.name||'';
@@ -233,7 +299,8 @@ async function saveEvent(){
   const hour=$('e-hour').value;
   if(!name){ msg('Nom requis', false); return; }
   if(!iso){ msg('Date requise', false); return; }
-  const key=$('e-key').value || db.ref('fts_events').push().key;
+  const selected = events.find(x => x.key === $('e-key').value || x.eventKey === $('e-key').value);
+  const key = (selected && selected.eventKey) || $('e-key').value || db.ref('fts_events').push().key;
   const active=$('e-active').value==='true';
   const data={
     name,
@@ -260,15 +327,25 @@ async function saveEvent(){
   if(!$('e-key').value) data.createdAt=Date.now();
   await db.ref('fts_events/'+key).set(data);
   await syncEventToQuestionnaire(key, data);
+  // Si l’événement venait d’une ancienne option du questionnaire, on supprime l’ancienne entrée
+  // après migration pour éviter les doublons.
+  if(selected && selected.qKey && selected.qKey !== questionEventKey(key)){
+    await db.ref('fts_content/questionnaire/options/' + selected.qKey).remove();
+  }
   selectedKey=key; $('e-key').value=key;
   msg('Événement enregistré — visible dans membres et dans le questionnaire');
 }
 async function deleteEvent(){
   const key=$('e-key').value;
   if(!key){ msg('Sélectionne un événement à supprimer', false); return; }
+  const selected = events.find(x => x.key === key || x.eventKey === key);
+  const eventKey = (selected && selected.eventKey) || key;
   if(!confirm('Supprimer définitivement cet événement ?')) return;
-  await db.ref('fts_events/'+key).remove();
-  await removeEventFromQuestionnaire(key);
+  const updates = {};
+  updates['fts_events/' + eventKey] = null;
+  updates['fts_content/questionnaire/options/' + questionEventKey(eventKey)] = null;
+  if(selected && selected.qKey) updates['fts_content/questionnaire/options/' + selected.qKey] = null;
+  await db.ref().update(updates);
   newEvent();
   msg('Événement supprimé');
 }
