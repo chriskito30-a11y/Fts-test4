@@ -1,15 +1,8 @@
-const CACHE = 'fts-v14-auth-android-fix';
+const CACHE = 'fts-v12-messages-fix';
 const FILES = [
   './manifest.json',
   './assets/img/fts192.png',
   './assets/img/fts512.png',
-  './assets/css/fts.css',
-  './assets/css/fts-chat.css',
-  './assets/js/fts-utils.js',
-  './assets/js/fts-firebase.js',
-  './assets/js/fts-pwa.js',
-  './auth.html',
-  './index.html',
   './membres.html',
   './forum.html',
   './messages.html',
@@ -32,16 +25,6 @@ self.addEventListener('activate', e => {
     )
   );
   self.clients.claim();
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
-      clients.forEach(client => client.postMessage({ type: 'FTS_SW_ACTIVATED' }));
-    });
-});
-
-
-self.addEventListener('message', event => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
-  }
 });
 
 self.addEventListener('fetch', e => {
@@ -68,21 +51,55 @@ function normalizeNotificationUrl(rawUrl){
 }
 
 // ═══ NOTIFICATIONS PUSH ═══════════════════════════
-self.addEventListener('push', function(event) {
+const NOTIF_DEDUPE_CACHE = 'fts-notification-dedupe-v1';
+const NOTIF_DEDUPE_TTL = 10 * 60 * 1000; // 10 min : absorbe doublons d'abonnements / retries
+
+function notificationDedupeKey(data){
+  return data.notificationKey || data.collapseKey || data.tag ||
+    data.resourceId || data.messageId || data.conversationId || data.eventId || data.channel || '';
+}
+
+async function wasRecentlyShownNotification(key){
+  if(!key || !('caches' in self)) return false;
+  try{
+    const cache = await caches.open(NOTIF_DEDUPE_CACHE);
+    const req = new Request(self.location.origin + '/__fts_notif_dedupe__/' + encodeURIComponent(key));
+    const res = await cache.match(req);
+    const now = Date.now();
+    if(res){
+      const ts = Number(await res.text()) || 0;
+      if(now - ts < NOTIF_DEDUPE_TTL) return true;
+    }
+    await cache.put(req, new Response(String(now), { headers:{ 'Content-Type':'text/plain' } }));
+  }catch(e){}
+  return false;
+}
+
+async function handlePushNotification(event){
   let data = { title: 'Fais Ton Show', body: 'Nouvelle notification', url: './membres.html' };
   try { if (event.data) data = event.data.json(); } catch(e) {}
+
   const url = normalizeNotificationUrl(data.url);
-  event.waitUntil(
-    self.registration.showNotification(data.title || 'Fais Ton Show', {
-      body: data.body || 'Nouvelle notification',
-      icon: './assets/img/fts192.png',
-      badge: './assets/img/fts192.png',
-      vibrate: [200, 100, 200],
-      tag: data.tag || data.resourceId || data.messageId || data.conversationId || data.channel || 'fts-notification',
-      renotify: true,
-      data: { ...data, url }
-    })
-  );
+  const dedupeKey = notificationDedupeKey(data);
+  if(dedupeKey && await wasRecentlyShownNotification(dedupeKey)) return;
+
+  const tag = data.tag || data.collapseKey || data.notificationKey ||
+    data.resourceId || data.messageId || data.conversationId || data.eventId || data.channel || 'fts-notification';
+
+  await self.registration.showNotification(data.title || 'Fais Ton Show', {
+    body: data.body || 'Nouvelle notification',
+    icon: './assets/img/fts192.png',
+    badge: './assets/img/fts192.png',
+    vibrate: [200, 100, 200],
+    tag,
+    // Si une notification identique arrive plusieurs fois, elle est remplacée sans revibrer.
+    renotify: data.renotify === true && !dedupeKey,
+    data: { ...data, url, notificationKey: dedupeKey || data.notificationKey || tag }
+  });
+}
+
+self.addEventListener('push', function(event) {
+  event.waitUntil(handlePushNotification(event));
 });
 
 self.addEventListener('notificationclick', function(event) {
