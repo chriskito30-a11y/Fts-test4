@@ -8,7 +8,7 @@
   if (!('serviceWorker' in navigator)) return;
 
   const SW_URL = './sw.js';
-  const RELOAD_KEY = 'fts-sw-reload-v12-auto-update';
+  const RELOAD_KEY = 'fts-sw-reload-v15-event-notif-dedupe';
   let refreshing = false;
 
   function safeReloadOnce(){
