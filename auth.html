@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 
 <meta name="application-name" content="Fais Ton Show">
 <meta name="apple-mobile-web-app-title" content="Fais Ton Show">
@@ -14,7 +14,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/css/fts.css">
+<link rel="stylesheet" href="assets/css/fts.css?v=14">
 
 <style>
 html, body { height: 100%; }
@@ -177,6 +177,50 @@ html, body { height: 100%; }
 
 /* ── LOADING STATE ── */
 .btn.loading { opacity: .6; cursor: not-allowed; }
+/* Correctif PWA Android — clavier sur auth */
+html, body {
+  min-height: 100%;
+  height: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+body {
+  -webkit-user-select: auto;
+  user-select: auto;
+}
+.auth-wrap {
+  min-height: 100dvh;
+  padding-bottom: calc(2rem + env(safe-area-inset-bottom));
+}
+.auth-card, .auth-body, .auth-form {
+  touch-action: manipulation;
+}
+.auth-card input,
+.auth-card textarea,
+.auth-card select {
+  position: relative;
+  z-index: 2;
+  font-size: 16px !important;
+  -webkit-user-select: text;
+  user-select: text;
+  touch-action: manipulation;
+  caret-color: var(--gold);
+}
+.auth-card input:focus,
+.auth-card textarea:focus,
+.auth-card select:focus {
+  outline: none;
+  border-color: var(--red);
+  box-shadow: 0 0 0 2px rgba(212,32,26,.12);
+}
+@media (max-width: 560px) {
+  .auth-wrap {
+    justify-content: flex-start;
+    padding-top: max(1.2rem, env(safe-area-inset-top));
+  }
+  .auth-logo { margin-bottom: 1.2rem; }
+}
+
 </style>
 </head>
 
@@ -532,7 +576,7 @@ function friendlyError(code) {
 }
 </script>
 
-<script src="assets/js/fts-pwa.js"></script>
+<script src="assets/js/fts-pwa.js?v=14"></script>
 <div class="install-bar" id="install-bar">
   <p id="install-msg"></p>
   <button class="btn-install" id="btn-install">Installer</button>

@@ -1,8 +1,15 @@
-const CACHE = 'fts-v12-messages-fix';
+const CACHE = 'fts-v14-auth-android-fix';
 const FILES = [
   './manifest.json',
   './assets/img/fts192.png',
   './assets/img/fts512.png',
+  './assets/css/fts.css',
+  './assets/css/fts-chat.css',
+  './assets/js/fts-utils.js',
+  './assets/js/fts-firebase.js',
+  './assets/js/fts-pwa.js',
+  './auth.html',
+  './index.html',
   './membres.html',
   './forum.html',
   './messages.html',
@@ -25,6 +32,16 @@ self.addEventListener('activate', e => {
     )
   );
   self.clients.claim();
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+      clients.forEach(client => client.postMessage({ type: 'FTS_SW_ACTIVATED' }));
+    });
+});
+
+
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('fetch', e => {
