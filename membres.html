@@ -1337,14 +1337,15 @@ function listenResourceNotificationFallback(uid){
   db.ref('fts_user_notifications/' + uid).limitToLast(20).on('child_added', async snap => {
     const n = snap.val() || {};
     if(!initialized) return;
-    if(n.type !== 'resource' || n.read === true) return;
+    if(!['resource','event'].includes(n.type) || n.read === true) return;
     if(Notification.permission !== 'granted') return;
     try{
       const reg = await navigator.serviceWorker.ready;
-      reg.showNotification(n.title || 'Nouveau document', {
-        body: n.body || 'Un nouveau document est disponible.',
+      const isEvent = n.type === 'event';
+      reg.showNotification(n.title || (isEvent ? 'Nouvel événement' : 'Nouveau document'), {
+        body: n.body || (isEvent ? 'Un nouvel événement est disponible.' : 'Un nouveau document est disponible.'),
         icon:'./assets/img/fts192.png', badge:'./assets/img/fts192.png',
-        tag:'resource-local-' + (n.resourceId || snap.key),
+        tag:(isEvent ? 'event-local-' : 'resource-local-') + (n.eventId || n.resourceId || snap.key),
         data:{ url:n.url || './membres.html' }
       });
     }catch(e){}
