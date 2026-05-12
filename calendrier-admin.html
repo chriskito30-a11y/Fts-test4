@@ -52,7 +52,7 @@
           <div class="field full"><label>Note interne / description</label><textarea id="e-desc" placeholder="Optionnel — détails utiles pour l’équipe"></textarea></div>
         </div>
         <div class="row-actions">
-          <button class="btn btn-sm" onclick="saveEvent()">Enregistrer</button>
+          <button class="btn btn-sm" id="btn-save-event" onclick="saveEvent()">Enregistrer</button>
           <button class="btn-outline" onclick="newEvent()">Nouveau</button>
           <button class="btn-outline danger" onclick="deleteEvent()">Supprimer</button>
         </div>
@@ -65,6 +65,10 @@
 <script src="assets/js/fts-firebase.js"></script>
 <script>
 let db, auth, events = [], selectedKey = '';
+let isSavingEvent = false;
+let eventReloadTimer = null;
+let hasBootSyncedEventsMirror = false;
+let isSyncingEventsMirror = false;
 function $(id){ return document.getElementById(id); }
 function msg(txt, ok=true){ const el=$('msg'); el.textContent=txt; el.className='msg '+(ok?'ok':'err'); setTimeout(()=>{ el.className='msg'; }, 3200); }
 function doLogout(){ firebase.auth().signOut().then(()=>location.href='auth.html'); }
@@ -91,7 +95,8 @@ function listenEvents(){
   // 1) fts_events = source officielle membres
   // 2) fts_content/questionnaire/options = copie publique utilisée par index
   // Cela permet de retrouver/modifier les anciens événements déjà synchronisés.
-  const reload = () => loadEventsFromAllSources();
+  // Le rechargement est délayé pour éviter les cascades d'écritures Firebase.
+  const reload = () => scheduleEventsReload();
   db.ref('fts_events').on('value', reload, err=>{
     console.warn('[FTS Calendrier] events', err);
     $('event-list').innerHTML='<div class="empty">Impossible de charger les événements fts_events.</div>';
@@ -99,6 +104,12 @@ function listenEvents(){
   db.ref('fts_content/questionnaire/options').on('value', reload, err=>{
     console.warn('[FTS Calendrier] questionnaire events', err);
   });
+}
+
+function scheduleEventsReload(){
+  if(isSyncingEventsMirror) return;
+  clearTimeout(eventReloadTimer);
+  eventReloadTimer = setTimeout(() => loadEventsFromAllSources(), 120);
 }
 
 async function loadEventsFromAllSources(){
@@ -155,7 +166,14 @@ async function loadEventsFromAllSources(){
       (a.name||'').localeCompare(b.name||'', 'fr')
     );
     renderList();
-    syncAllEventsToQuestionnaire();
+
+    // Migration / réparation du miroir questionnaire uniquement au premier chargement.
+    // Ce miroir est nécessaire pour index.html si fts_events n'est pas lisible publiquement,
+    // mais le relancer à chaque listener crée des boucles d'écritures.
+    if(!hasBootSyncedEventsMirror){
+      hasBootSyncedEventsMirror = true;
+      await syncAllEventsToQuestionnaire();
+    }
   }catch(e){
     console.warn('[FTS Calendrier] load all sources', e);
     $('event-list').innerHTML='<div class="empty">Impossible de charger les événements.</div>';
@@ -284,6 +302,8 @@ async function removeEventFromQuestionnaire(key){
   await db.ref('fts_content/questionnaire/options/' + questionEventKey(key)).remove();
 }
 async function syncAllEventsToQuestionnaire(){
+  if(isSyncingEventsMirror) return;
+  isSyncingEventsMirror = true;
   try{
     const snap = await db.ref('fts_events').once('value');
     const updates = {};
@@ -292,6 +312,9 @@ async function syncAllEventsToQuestionnaire(){
     });
     if(Object.keys(updates).length) await db.ref().update(updates);
   }catch(e){ console.warn('[FTS Calendrier] sync questionnaire', e); }
+  finally{
+    setTimeout(() => { isSyncingEventsMirror = false; }, 250);
+  }
 }
 async function getEventRecipientUids(excludeUid){
   const snap = await db.ref('fts_users').orderByChild('status').equalTo('active').once('value');
@@ -313,10 +336,11 @@ async function notifyNewEvent(key, data){
     const locationText = data.location || data.l || '';
     const details = [dateText + (hourText ? ' · ' + hourText : ''), locationText].filter(Boolean).join(' · ');
     const url = './membres.html?event=' + encodeURIComponent(key);
+    const notificationKey = 'event-' + key;
 
     // Trace interne utile pour audit / fallback local côté membres.
     const notif = {
-      type:'event', eventId:key, title:'Nouvel événement',
+      type:'event', eventId:key, notificationKey, title:'Nouvel événement',
       body:(data.name || data.title || 'Nouvel événement') + (details ? ' · ' + details : ''),
       url, read:false, createdAt:Date.now(), authorUid:currentUser
     };
@@ -330,71 +354,100 @@ async function notifyNewEvent(key, data){
     if(!FTS.PUSH || !FTS.PUSH.workerUrl){
       await db.ref('fts_debug_notifications/event_' + key).set({
         ok:false, reason:'FTS.PUSH.workerUrl manquant dans fts-firebase.js',
-        recipientCount:recipientUids.length, recipients:recipientUids, eventId:key, createdAt:Date.now()
+        recipientCount:recipientUids.length, recipients:recipientUids, eventId:key, notificationKey, createdAt:Date.now()
       }).catch(()=>{});
       return;
     }
 
-    const pushPayloadBase = {
-      type:'event', eventId:key, title:'FTS — Nouvel événement',
+    const payload = {
+      type:'event',
+      eventId:key,
+      notificationKey,
+      title:'FTS — Nouvel événement',
       body:(data.name || data.title || 'Nouvel événement') + (details ? ' · ' + details : ''),
-      url, senderUid:currentUser
+      url,
+      senderUid:currentUser,
+      uids:recipientUids,
+      recipientUids,
+      recipients:recipientUids,
+      tag:notificationKey,
+      collapseKey:notificationKey,
+      forceUid:true
     };
-    await Promise.allSettled(recipientUids.map(uid =>
-      fetch(FTS.PUSH.workerUrl + '/notify', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-          ...pushPayloadBase,
-          uid, uids:[uid], recipientUids:[uid], recipients:[uid], forceUid:true,
-          tag:'event-' + key + '-' + uid
-        })
-      })
-    ));
+
+    const res = await fetch(FTS.PUSH.workerUrl + '/notify', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload)
+    });
+
+    await db.ref('fts_debug_notifications/' + notificationKey).set({
+      ok:res.ok,
+      status:res.status,
+      recipientCount:recipientUids.length,
+      recipients:recipientUids,
+      eventId:key,
+      notificationKey,
+      createdAt:Date.now()
+    }).catch(()=>{});
   }catch(e){ console.warn('[FTS Calendrier] Notification événement non envoyée', e); }
 }
 async function saveEvent(){
-  const name=$('e-name').value.trim();
-  const iso=$('e-date').value;
-  const hour=$('e-hour').value;
-  if(!name){ msg('Nom requis', false); return; }
-  if(!iso){ msg('Date requise', false); return; }
-  const selected = events.find(x => x.key === $('e-key').value || x.eventKey === $('e-key').value);
-  const key = (selected && selected.eventKey) || $('e-key').value || db.ref('fts_events').push().key;
-  const active=$('e-active').value==='true';
-  const data={
-    name,
-    title:name,
-    n:name,
-    type:$('e-type').value.trim(),
-    t:$('e-type').value.trim(),
-    active,
-    status:active?'active':'inactive',
-    dateIso:iso,
-    date:frDateLabel(iso),
-    dateLabel:frDateLabel(iso),
-    d:frDateLabel(iso),
-    hour,
-    h:hour,
-    location:$('e-location').value.trim(),
-    l:$('e-location').value.trim(),
-    url:$('e-url').value.trim(),
-    u:$('e-url').value.trim(),
-    description:$('e-desc').value.trim(),
-    dateTs:dateTs(iso,hour),
-    updatedAt:Date.now()
-  };
-  const isNewEvent = !$('e-key').value && !(selected && selected.eventKey);
-  if(isNewEvent) data.createdAt=Date.now();
-  await db.ref('fts_events/'+key).set(data);
-  await syncEventToQuestionnaire(key, data);
-  if(isNewEvent) await notifyNewEvent(key, data);
-  // Si l’événement venait d’une ancienne option du questionnaire, on supprime l’ancienne entrée
-  // après migration pour éviter les doublons.
-  if(selected && selected.qKey && selected.qKey !== questionEventKey(key)){
-    await db.ref('fts_content/questionnaire/options/' + selected.qKey).remove();
+  if(isSavingEvent) return;
+  const saveBtn = $('btn-save-event');
+  isSavingEvent = true;
+  if(saveBtn){ saveBtn.disabled = true; saveBtn.textContent = 'Enregistrement…'; }
+
+  try{
+    const name=$('e-name').value.trim();
+    const iso=$('e-date').value;
+    const hour=$('e-hour').value;
+    if(!name){ msg('Nom requis', false); return; }
+    if(!iso){ msg('Date requise', false); return; }
+    const selected = events.find(x => x.key === $('e-key').value || x.eventKey === $('e-key').value);
+    const key = (selected && selected.eventKey) || $('e-key').value || db.ref('fts_events').push().key;
+    const active=$('e-active').value==='true';
+    const data={
+      name,
+      title:name,
+      n:name,
+      type:$('e-type').value.trim(),
+      t:$('e-type').value.trim(),
+      active,
+      status:active?'active':'inactive',
+      dateIso:iso,
+      date:frDateLabel(iso),
+      dateLabel:frDateLabel(iso),
+      d:frDateLabel(iso),
+      hour,
+      h:hour,
+      location:$('e-location').value.trim(),
+      l:$('e-location').value.trim(),
+      url:$('e-url').value.trim(),
+      u:$('e-url').value.trim(),
+      description:$('e-desc').value.trim(),
+      dateTs:dateTs(iso,hour),
+      updatedAt:Date.now()
+    };
+    const isNewEvent = !$('e-key').value && !(selected && selected.eventKey);
+    if(isNewEvent) data.createdAt=Date.now();
+    await db.ref('fts_events/'+key).set(data);
+    await syncEventToQuestionnaire(key, data);
+    if(isNewEvent) await notifyNewEvent(key, data);
+    // Si l’événement venait d’une ancienne option du questionnaire, on supprime l’ancienne entrée
+    // après migration pour éviter les doublons.
+    if(selected && selected.qKey && selected.qKey !== questionEventKey(key)){
+      await db.ref('fts_content/questionnaire/options/' + selected.qKey).remove();
+    }
+    selectedKey=key; $('e-key').value=key;
+    msg('Événement enregistré — visible dans membres et dans le questionnaire');
+  }catch(e){
+    console.warn('[FTS Calendrier] saveEvent', e);
+    msg('Erreur enregistrement : ' + (e && e.message ? e.message : e), false);
+  }finally{
+    isSavingEvent = false;
+    if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = 'Enregistrer'; }
   }
-  selectedKey=key; $('e-key').value=key;
-  msg('Événement enregistré — visible dans membres et dans le questionnaire');
 }
 async function deleteEvent(){
   const key=$('e-key').value;
